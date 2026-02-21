@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality, type Session } from '@google/genai';
+import { GoogleGenAI, Modality, Type, type Session } from '@google/genai';
 import './style.css';
 
 type Challenge = {
@@ -48,12 +48,45 @@ type HistoryRecord = {
   timestamp: string;
 };
 
+type JudgeParseTrace = {
+  source: 'live-key-value' | 'live-json' | 'normalizer-json' | 'narrative-fallback' | 'parse-failed';
+  normalizerModel?: string;
+  normalizerRawText?: string;
+  normalizerError?: string;
+};
+
+type JudgeParseOutput = {
+  result: JudgeResult;
+  trace: JudgeParseTrace;
+};
+
+type CaptureEvidence = {
+  frameSamples: string[];
+  videoFramesSent: number;
+  audioChunksSent: number;
+  audioClipBase64: string | null;
+  audioClipMimeType: string | null;
+  audioClipBytes: number;
+};
+
+type AudioCaptureResult = {
+  sentChunks: number;
+  audioClipBase64: string | null;
+  audioClipMimeType: string | null;
+  audioClipBytes: number;
+};
+
+type AudioRealtimeStreamer = {
+  stop: () => AudioCaptureResult;
+};
+
 const STORAGE_KEY = 'reality-quest-state-v1';
 const HISTORY_STORAGE_KEY = 'reality-quest-history-v1';
 const CUSTOM_CHALLENGE_STORAGE_KEY = 'reality-quest-custom-challenge-v1';
 const CAPTURE_SECONDS = resolveCaptureSeconds();
 const CUSTOM_CHALLENGE_POINTS = 150;
 const MAX_EVALUATION_FRAMES = 12;
+const JUDGE_NORMALIZER_TIMEOUT_MS = 8000;
 
 const FIXED_CHALLENGES: Challenge[] = [
   {
@@ -99,7 +132,7 @@ const FIXED_CHALLENGES: Challenge[] = [
     points: 130,
   },
   {
-    id: '',
+    id: 'banzai-pose',
     title: 'バンザイ',
     description: '両手を上げてください。バンザイの姿勢をとってください。',
     points: 130,
@@ -313,39 +346,92 @@ async function verifyCurrentChallenge() {
   resultLocation.textContent = '位置判定: -';
   resultActions.textContent = '検出アクション: -';
   setJudgeDebug({ status: 'running', message: '判定中...' });
+  let verifyPhase = 'init';
 
   try {
-    setStatus('カメラを起動しています...', 'info');
-    await startCamera();
+    verifyPhase = 'start-media';
+    setStatus('カメラとマイクを起動しています...', 'info');
+    await startMediaCapture();
 
+    verifyPhase = 'capture-session-connect';
     const locationSnapshot = await getLocationSnapshot(currentChallenge);
-    const { session, responsePromise, modelName } = await createLiveSession(apiKey);
-    activeSession = session;
+    const { session: captureSession, modelName: captureModelName } = await createLiveSession(apiKey);
+    activeSession = captureSession;
 
-    setStatus(`${modelName} へ接続完了。${CAPTURE_SECONDS} 秒間、動作を撮影します。`, 'info');
-    const frameSamples = await captureFrameSamples(preview, CAPTURE_SECONDS, (remainingSeconds) => {
+    verifyPhase = 'capture-evidence';
+    setStatus(`${captureModelName} へ接続完了。${CAPTURE_SECONDS} 秒間、動作を撮影します。`, 'info');
+    const evidence = await captureEvidence(captureSession, preview, activeStream, CAPTURE_SECONDS, (remainingSeconds) => {
       setStatus(`撮影中... 残り ${remainingSeconds} 秒`, 'info');
     });
-    setStatus(`撮影完了。${frameSamples.length} フレームで判定します。`, 'info');
+    setStatus(
+      `収集完了。映像 ${evidence.videoFramesSent} フレーム / 音声 ${evidence.audioChunksSent} チャンクで判定します。`,
+      'info',
+    );
 
-    const evaluationPrompt = buildEvaluationPrompt(currentChallenge, locationSnapshot);
+    try {
+      captureSession.close();
+    } catch {
+      // ignore close error
+    }
+    if (activeSession === captureSession) {
+      activeSession = null;
+    }
+
+    const evaluationPrompt = buildEvaluationPrompt(currentChallenge, locationSnapshot, Boolean(evidence.audioClipBase64));
     const evaluationParts: Array<{ inlineData: { mimeType: string; data: string } } | { text: string }> = [
-      ...frameSamples.map((data) => ({
+      { text: evaluationPrompt },
+      ...evidence.frameSamples.map((data) => ({
         inlineData: {
           mimeType: 'image/jpeg',
           data,
         },
       })),
-      { text: evaluationPrompt },
+      ...(evidence.audioClipBase64 && evidence.audioClipMimeType
+        ? [
+            {
+              inlineData: {
+                mimeType: evidence.audioClipMimeType,
+                data: evidence.audioClipBase64,
+              },
+            },
+          ]
+        : []),
     ];
 
-    session.sendClientContent({
-      turns: [{ role: 'user', parts: evaluationParts }],
-      turnComplete: true,
-    });
+    let rawText = '';
+    let judgeTransport: 'live' | 'generate-content-fallback' = 'live';
+    let judgeModelUsed = '';
+    let judgeLiveError: string | null = null;
 
-    const rawText = await withTimeout(responsePromise, 20000, 'モデルの応答がタイムアウトしました');
-    const judgeResult = parseJudgeResult(rawText);
+    try {
+      verifyPhase = 'judge-session-connect';
+      const { session: judgeSession, responsePromise, modelName, armJudgeTurn } = await createLiveSession(apiKey);
+      activeSession = judgeSession;
+      judgeModelUsed = modelName;
+      setStatus(`${modelName} で最終判定を実行します。`, 'info');
+
+      verifyPhase = 'judge-turn';
+      armJudgeTurn();
+      judgeSession.sendClientContent({
+        turns: [{ role: 'user', parts: evaluationParts }],
+        turnComplete: true,
+      });
+
+      rawText = await withTimeout(responsePromise, 20000, 'モデルの応答がタイムアウトしました');
+    } catch (error) {
+      judgeLiveError = stringifyError(error);
+      closeSession();
+      verifyPhase = 'judge-fallback-model';
+      setStatus(`Live 判定エラー (${judgeLiveError})。フォールバック判定を実行します。`, 'info');
+      const fallback = await runFallbackJudgeWithGenerateContent(apiKey, evaluationParts);
+      rawText = fallback.rawText;
+      judgeModelUsed = fallback.modelName;
+      judgeTransport = 'generate-content-fallback';
+    }
+
+    verifyPhase = 'parse-result';
+    const parsed = await parseJudgeResult(rawText, apiKey, currentChallenge);
+    const judgeResult = parsed.result;
     const locationMessage = evaluateLocation(currentChallenge, locationSnapshot);
     const finalJudgement = combineJudgement(judgeResult, currentChallenge.points, locationMessage);
     setJudgeDebug({
@@ -357,9 +443,18 @@ async function verifyCurrentChallenge() {
         points: currentChallenge.points,
       },
       captureSeconds: CAPTURE_SECONDS,
-      sampledFrames: frameSamples.length,
+      sampledFrames: evidence.frameSamples.length,
+      videoFramesSent: evidence.videoFramesSent,
+      audioChunksSent: evidence.audioChunksSent,
+      audioClipSent: Boolean(evidence.audioClipBase64),
+      audioClipMimeType: evidence.audioClipMimeType,
+      audioClipBytes: evidence.audioClipBytes,
+      judgeTransport,
+      judgeModelUsed,
+      judgeLiveError,
       rawModelText: rawText,
       parsedJudgeResult: judgeResult,
+      judgeParseTrace: parsed.trace,
       finalJudgement,
       locationSnapshot,
     });
@@ -377,6 +472,7 @@ async function verifyCurrentChallenge() {
     setJudgeDebug({
       timestamp: new Date().toISOString(),
       status: 'error',
+      phase: verifyPhase,
       error: message,
     });
   } finally {
@@ -515,6 +611,7 @@ async function createLiveSession(apiKey: string) {
     let resolved = false;
     let hasTranscriptChunk = false;
     let lastTranscriptChunk = '';
+    let judgeTurnArmed = false;
 
     let resolveResponse!: (value: string) => void;
     let rejectResponse!: (reason?: unknown) => void;
@@ -523,6 +620,13 @@ async function createLiveSession(apiKey: string) {
       resolveResponse = resolve;
       rejectResponse = reject;
     });
+
+    const armJudgeTurn = () => {
+      judgeTurnArmed = true;
+      hasTranscriptChunk = false;
+      lastTranscriptChunk = '';
+      textParts.length = 0;
+    };
 
     try {
       const session = await ai.live.connect({
@@ -541,6 +645,10 @@ async function createLiveSession(apiKey: string) {
         },
         callbacks: {
           onmessage: (message: any) => {
+            if (!judgeTurnArmed) {
+              return;
+            }
+
             const outputTranscription = message?.serverContent?.outputTranscription?.text;
             if (typeof outputTranscription === 'string' && outputTranscription.trim()) {
               const cleaned = outputTranscription.trim();
@@ -570,12 +678,18 @@ async function createLiveSession(apiKey: string) {
             }
           },
           onerror: (event: ErrorEvent) => {
+            if (!judgeTurnArmed) {
+              return;
+            }
             if (!resolved) {
               resolved = true;
               rejectResponse(new Error(event.message || 'Live API error'));
             }
           },
           onclose: (event: CloseEvent) => {
+            if (!judgeTurnArmed) {
+              return;
+            }
             if (!resolved && textParts.length === 0) {
               resolved = true;
               rejectResponse(new Error(event.reason || 'Live API session closed'));
@@ -584,7 +698,7 @@ async function createLiveSession(apiKey: string) {
         },
       });
 
-      return { session, responsePromise, modelName };
+      return { session, responsePromise, modelName, armJudgeTurn };
     } catch (error) {
       errors.push(`${modelName}: ${stringifyError(error)}`);
     }
@@ -611,11 +725,17 @@ function resolveVoiceName(): string {
   return configured || 'Kore';
 }
 
-async function captureFrameSamples(
+async function captureEvidence(
+  session: Session,
   video: HTMLVideoElement,
+  stream: MediaStream | null,
   seconds: number,
   onTick?: (remainingSeconds: number) => void,
-): Promise<string[]> {
+): Promise<CaptureEvidence> {
+  if (!stream) {
+    throw new Error('メディアストリームが取得できていません');
+  }
+
   await waitForVideoReady(video);
 
   const canvas = document.createElement('canvas');
@@ -625,7 +745,21 @@ async function captureFrameSamples(
   }
 
   const sampleInterval = Math.max(1, Math.floor(seconds / MAX_EVALUATION_FRAMES));
-  const frames: string[] = [];
+  const frameSamples: string[] = [];
+  let videoFramesSent = 0;
+  let audioStreamer: AudioRealtimeStreamer = {
+    stop: () => ({
+      sentChunks: 0,
+      audioClipBase64: null,
+      audioClipMimeType: null,
+      audioClipBytes: 0,
+    }),
+  };
+  try {
+    audioStreamer = await startAudioRealtimeStreamer(session, stream);
+  } catch {
+    // Continue with video-only if microphone processing fails.
+  }
 
   for (let elapsed = 0; elapsed < seconds; elapsed += 1) {
     const remaining = seconds - elapsed;
@@ -636,19 +770,41 @@ async function captureFrameSamples(
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
     const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+
+    try {
+      session.sendRealtimeInput({
+        media: {
+          mimeType: 'image/jpeg',
+          data: base64,
+        },
+      });
+      videoFramesSent += 1;
+    } catch {
+      // ignore realtime video send failure and continue local capture
+    }
+
     const shouldSample = elapsed % sampleInterval === 0 || elapsed === seconds - 1;
     if (shouldSample) {
-      frames.push(base64);
+      frameSamples.push(base64);
     }
 
     await sleep(1000);
   }
 
-  if (frames.length === 0) {
+  const audioCapture = audioStreamer.stop();
+
+  if (frameSamples.length === 0) {
     throw new Error('判定用フレームを取得できませんでした');
   }
 
-  return frames;
+  return {
+    frameSamples,
+    videoFramesSent,
+    audioChunksSent: audioCapture.sentChunks,
+    audioClipBase64: audioCapture.audioClipBase64,
+    audioClipMimeType: audioCapture.audioClipMimeType,
+    audioClipBytes: audioCapture.audioClipBytes,
+  };
 }
 
 async function getLocationSnapshot(challenge: Challenge): Promise<LocationSnapshot> {
@@ -722,14 +878,14 @@ function evaluateLocation(challenge: Challenge, snapshot: LocationSnapshot): str
 function buildSystemInstruction() {
   return [
     'あなたは実世界ミッションの厳密な審査員です。',
-    '送信された映像情報だけを根拠にし、未確認なら必ず失敗判定にしてください。',
+    '送信された映像と音声を根拠にし、未確認なら必ず失敗判定にしてください。',
     '応答は必ず1行のみ。説明文は禁止。',
     '形式は次だけを使用: success=<true|false>;confidence=<0-1>;reason=<短文>;detected_actions=<a|b|c>;safety_notes=<短文>',
     'confidence は 0 から 1 の実数。',
   ].join(' ');
 }
 
-function buildEvaluationPrompt(challenge: Challenge, location: LocationSnapshot) {
+function buildEvaluationPrompt(challenge: Challenge, location: LocationSnapshot, hasAudioClip: boolean) {
   const locationDetails = challenge.locationCheck
     ? `\n位置条件: ${challenge.locationCheck.label} から半径 ${challenge.locationCheck.radiusMeters}m 以内。`
     : '\n位置条件: なし。';
@@ -744,34 +900,77 @@ function buildEvaluationPrompt(challenge: Challenge, location: LocationSnapshot)
     `チャレンジ: ${challenge.description}`,
     locationDetails,
     locationMeasurement,
+    hasAudioClip
+      ? '映像フレームと音声（realtime + audio/wav クリップ）を送信済みです。歌う・話す等の音声系条件は音声を根拠に判定してください。'
+      : '映像フレームと音声ストリームを送信済みです。音声クリップは未添付です。歌う・話す等の音声系条件は受信できた音声だけを根拠に判定してください。',
     '画面内で確認できた具体的な行動を detected_actions に 1〜4 件記載してください。',
     '最終回答は次の1行形式だけで返してください。',
     'success=<true|false>;confidence=<0-1>;reason=<短文>;detected_actions=<a|b|c>;safety_notes=<短文>',
   ].join('\n');
 }
 
-function parseJudgeResult(rawText: string): JudgeResult {
+async function parseJudgeResult(rawText: string, apiKey: string, challenge: Challenge): Promise<JudgeParseOutput> {
   const keyValueParsed = parseKeyValueJudgeResult(rawText);
   if (keyValueParsed) {
-    return keyValueParsed;
+    return {
+      result: keyValueParsed,
+      trace: {
+        source: 'live-key-value',
+      },
+    };
+  }
+
+  const jsonParsed = parseJsonJudgeResult(rawText);
+  if (jsonParsed) {
+    return {
+      result: jsonParsed,
+      trace: {
+        source: 'live-json',
+      },
+    };
+  }
+
+  let normalizerError: string | undefined;
+  try {
+    const normalized = await normalizeJudgeResultWithModel(apiKey, challenge, rawText);
+    if (normalized) {
+      return {
+        result: normalized.result,
+        trace: {
+          source: 'normalizer-json',
+          normalizerModel: normalized.modelName,
+          normalizerRawText: normalized.rawText,
+        },
+      };
+    }
+  } catch (error) {
+    normalizerError = stringifyError(error);
   }
 
   const narrativeParsed = parseNarrativeJudgeResult(rawText);
   if (narrativeParsed) {
-    return narrativeParsed;
+    return {
+      result: narrativeParsed,
+      trace: {
+        source: 'narrative-fallback',
+        normalizerError,
+      },
+    };
   }
 
-  const fallback: JudgeResult = {
-    success: false,
-    confidence: 0,
-    reason: `JSON 解析失敗: ${rawText.slice(0, 240)}`,
-    detectedActions: [],
-    safetyNotes: '',
+  return {
+    result: buildParseFailureResult(rawText),
+    trace: {
+      source: 'parse-failed',
+      normalizerError,
+    },
   };
+}
 
+function parseJsonJudgeResult(rawText: string): JudgeResult | null {
   const jsonCandidate = extractJson(rawText);
   if (!jsonCandidate) {
-    return fallback;
+    return null;
   }
 
   try {
@@ -780,24 +979,195 @@ function parseJudgeResult(rawText: string): JudgeResult {
       confidence?: unknown;
       reason?: unknown;
       detected_actions?: unknown;
+      detectedActions?: unknown;
       safety_notes?: unknown;
+      safetyNotes?: unknown;
     };
 
-    const confidence = normalizeConfidence(parsed.confidence);
-    const detectedActions = Array.isArray(parsed.detected_actions)
-      ? parsed.detected_actions.filter((v): v is string => typeof v === 'string').slice(0, 8)
+    const detectedActionsRaw = parsed.detected_actions ?? parsed.detectedActions;
+    const safetyNotesRaw = parsed.safety_notes ?? parsed.safetyNotes;
+    const detectedActions = Array.isArray(detectedActionsRaw)
+      ? detectedActionsRaw.filter((v): v is string => typeof v === 'string').slice(0, 8)
       : [];
 
     return {
-      success: parsed.success === true,
-      confidence,
+      success: normalizeBoolean(parsed.success),
+      confidence: normalizeConfidence(parsed.confidence),
       reason: typeof parsed.reason === 'string' ? parsed.reason : '理由が返されませんでした。',
       detectedActions,
-      safetyNotes: typeof parsed.safety_notes === 'string' ? parsed.safety_notes : '',
+      safetyNotes: typeof safetyNotesRaw === 'string' ? safetyNotesRaw : '',
     };
   } catch {
-    return fallback;
+    return null;
   }
+}
+
+function buildParseFailureResult(rawText: string): JudgeResult {
+  return {
+    success: false,
+    confidence: 0,
+    reason: `JSON 解析失敗: ${rawText.slice(0, 240)}`,
+    detectedActions: [],
+    safetyNotes: '',
+  };
+}
+
+async function normalizeJudgeResultWithModel(apiKey: string, challenge: Challenge, rawText: string) {
+  const ai = new GoogleGenAI({ apiKey });
+  const models = resolveJudgeNormalizerModelCandidates();
+  const errors: string[] = [];
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      success: { type: Type.BOOLEAN },
+      confidence: { type: Type.NUMBER },
+      reason: { type: Type.STRING },
+      detectedActions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+      },
+      safetyNotes: { type: Type.STRING },
+    },
+    required: ['success', 'confidence', 'reason', 'detectedActions', 'safetyNotes'],
+  };
+
+  for (const modelName of models) {
+    try {
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: modelName,
+          contents: buildJudgeNormalizerPrompt(challenge, rawText),
+          config: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        }),
+        JUDGE_NORMALIZER_TIMEOUT_MS,
+        `判定正規化モデル (${modelName}) がタイムアウトしました`,
+      );
+
+      const normalizedText = (response.text ?? '').trim();
+      if (!normalizedText) {
+        errors.push(`${modelName}: empty response`);
+        continue;
+      }
+
+      const parsed = parseJsonJudgeResult(normalizedText);
+      if (!parsed) {
+        errors.push(`${modelName}: invalid json payload`);
+        continue;
+      }
+
+      return {
+        modelName,
+        rawText: normalizedText,
+        result: {
+          ...parsed,
+          safetyNotes: mergeSafetyNotes(parsed.safetyNotes, `normalizer:${modelName}`),
+        },
+      };
+    } catch (error) {
+      errors.push(`${modelName}: ${stringifyError(error)}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join(' | '));
+  }
+
+  return null;
+}
+
+function resolveJudgeNormalizerModelCandidates(): string[] {
+  const configured = (import.meta.env.VITE_GEMINI_JUDGE_NORMALIZER_MODEL ?? '').trim();
+  if (configured) {
+    return [configured];
+  }
+
+  return ['gemini-2.5-flash', 'gemini-2.0-flash'];
+}
+
+function buildJudgeNormalizerPrompt(challenge: Challenge, rawText: string): string {
+  return [
+    'あなたは審査テキスト正規化器です。入力の審査文だけを根拠に、指定JSONを返してください。',
+    '新しい判定を作らず、審査文に含まれる結論を抽出してください。',
+    '審査文が矛盾・不明瞭な場合は success=false、confidence は 0.4 以下にしてください。',
+    'reason は 120 文字以内で、要点だけを日本語で記載してください。',
+    'detectedActions は 0〜4 件の短い語句配列にしてください。',
+    `challenge: ${challenge.description}`,
+    `judge_text: ${rawText}`,
+  ].join('\n');
+}
+
+async function runFallbackJudgeWithGenerateContent(
+  apiKey: string,
+  parts: Array<{ inlineData: { mimeType: string; data: string } } | { text: string }>,
+): Promise<{ rawText: string; modelName: string }> {
+  const ai = new GoogleGenAI({ apiKey });
+  const models = resolveJudgeFallbackModelCandidates();
+  const errors: string[] = [];
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      success: { type: Type.BOOLEAN },
+      confidence: { type: Type.NUMBER },
+      reason: { type: Type.STRING },
+      detectedActions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+      },
+      safetyNotes: { type: Type.STRING },
+    },
+    required: ['success', 'confidence', 'reason', 'detectedActions', 'safetyNotes'],
+  };
+
+  for (const modelName of models) {
+    try {
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: modelName,
+          contents: parts,
+          config: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        }),
+        20000,
+        `フォールバック判定モデル (${modelName}) がタイムアウトしました`,
+      );
+
+      const rawText = (response.text ?? '').trim();
+      if (!rawText) {
+        errors.push(`${modelName}: empty response`);
+        continue;
+      }
+
+      const parsed = parseJsonJudgeResult(rawText) ?? parseKeyValueJudgeResult(rawText);
+      if (!parsed) {
+        errors.push(`${modelName}: unparseable response`);
+        continue;
+      }
+
+      return { rawText, modelName };
+    } catch (error) {
+      errors.push(`${modelName}: ${stringifyError(error)}`);
+    }
+  }
+
+  throw new Error(`フォールバック判定に失敗しました。${errors.join(' | ')}`);
+}
+
+function resolveJudgeFallbackModelCandidates(): string[] {
+  const configured = (import.meta.env.VITE_GEMINI_JUDGE_FALLBACK_MODEL ?? '').trim();
+  if (configured) {
+    return [configured];
+  }
+
+  return ['gemini-2.5-flash', 'gemini-2.0-flash'];
 }
 
 function parseNarrativeJudgeResult(rawText: string): JudgeResult | null {
@@ -807,29 +1177,73 @@ function parseNarrativeJudgeResult(rawText: string): JudgeResult | null {
   }
 
   const lower = normalized.toLowerCase();
+
+  // 1) Explicit success flag in narrative text wins.
+  const explicitFalsePatterns = [
+    /success\s*(?:is|=|:|to)?\s*false/i,
+    /success\s*:\s*false/i,
+    /\bsuccess\s+false\b/i,
+    /成功\s*(?:は|が)?\s*false/i,
+    /成功\s*ではない/i,
+    /失敗/i,
+  ];
+  const explicitTruePatterns = [
+    /success\s*(?:is|=|:|to)?\s*true/i,
+    /success\s*:\s*true/i,
+    /\bsuccess\s+true\b/i,
+    /成功\s*(?:です|した)/i,
+  ];
+
+  const hasExplicitFalse = explicitFalsePatterns.some((pattern) => pattern.test(normalized));
+  const hasExplicitTrue = explicitTruePatterns.some((pattern) => pattern.test(normalized));
+
+  if (hasExplicitFalse && !hasExplicitTrue) {
+    return {
+      success: false,
+      confidence: 0.9,
+      reason: summarizeNarrativeReason(normalized),
+      detectedActions: [],
+      safetyNotes: 'fallback:narrative-explicit-false',
+    };
+  }
+  if (hasExplicitTrue && !hasExplicitFalse) {
+    return {
+      success: true,
+      confidence: 0.85,
+      reason: summarizeNarrativeReason(normalized),
+      detectedActions: [],
+      safetyNotes: 'fallback:narrative-explicit-true',
+    };
+  }
+
+  // 2) Heuristic signal counting (negative-biased for safety).
   const positivePatterns = [
     /successful completion/g,
-    /\bsuccess(?:ful|fully)?\b/g,
-    /\bcompleted?\b/g,
-    /\bmeets? (the )?criteria\b/g,
-    /\bpositive validation(s)?\b/g,
-    /\bdefinitively demonstrate\b/g,
+    /completed successfully/g,
+    /challenge (?:was )?completed/g,
+    /criteria (?:are|is|were|was) met/g,
+    /requirement(?:s)? (?:are|is|were|was) met/g,
+    /confirmed utterance/g,
     /達成/g,
-    /成功/g,
     /条件を満た/g,
   ];
   const negativePatterns = [
     /\bfail(?:ed|ure)?\b/g,
-    /does not meet/g,
-    /did not/g,
-    /not completed/g,
     /cannot confirm/g,
+    /unable to confirm/g,
+    /could not confirm/g,
+    /unconfirmed/g,
     /insufficient/g,
-    /no (visual )?evidence/g,
-    /does not align/g,
-    /失敗/g,
-    /確認できない/g,
+    /does not meet/g,
+    /not completed/g,
+    /no (visual|audio)?\s*evidence/g,
+    /lack of audio/g,
+    /without audio/g,
+    /audio (?:stream )?(?:is )?(?:unavailable|missing|not available|could not be confirmed)/g,
+    /音声ストリームが確認できません/g,
+    /確認できません/g,
     /未達成/g,
+    /失敗/g,
   ];
 
   const positiveHits = countMatches(lower, positivePatterns);
@@ -839,17 +1253,18 @@ function parseNarrativeJudgeResult(rawText: string): JudgeResult | null {
     return null;
   }
 
-  const success = positiveHits >= negativeHits;
-  const confidenceBase = 0.55 + Math.min(0.3, Math.abs(positiveHits - negativeHits) * 0.08);
+  // Negative wins ties to avoid false-positive scoring.
+  const success = positiveHits > negativeHits;
+  const delta = Math.abs(positiveHits - negativeHits);
+  const confidenceBase = 0.55 + Math.min(0.3, delta * 0.08);
   const confidence = clamp(confidenceBase, 0.5, 0.85);
-  const firstSentence = normalized.split(/(?<=[.!?。！？])\s+/)[0] ?? normalized;
 
   return {
     success,
     confidence,
-    reason: firstSentence.slice(0, 220),
+    reason: summarizeNarrativeReason(normalized),
     detectedActions: [],
-    safetyNotes: 'fallback:narrative-parse',
+    safetyNotes: success ? 'fallback:narrative-heuristic-true' : 'fallback:narrative-heuristic-false',
   };
 }
 
@@ -877,7 +1292,7 @@ function parseKeyValueJudgeResult(rawText: string): JudgeResult | null {
   const actionsRaw = map.get('detected_actions') ?? '';
 
   const detectedActions = actionsRaw
-    .split('|')
+    .split(/[|,、]/)
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
     .slice(0, 8);
@@ -903,11 +1318,40 @@ function normalizeConfidence(value: unknown): number {
   return clamp(value, 0, 1);
 }
 
+function normalizeBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value > 0;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+  return false;
+}
+
+function mergeSafetyNotes(base: string, extra: string): string {
+  if (!base) {
+    return extra;
+  }
+  if (base.includes(extra)) {
+    return base;
+  }
+  return `${base}|${extra}`;
+}
+
 function countMatches(text: string, patterns: RegExp[]): number {
   return patterns.reduce((count, pattern) => {
     const matches = text.match(pattern);
     return count + (matches ? matches.length : 0);
   }, 0);
+}
+
+function summarizeNarrativeReason(text: string): string {
+  const firstSentence = text.split(/(?<=[.!?。！？])\s+/)[0] ?? text;
+  return firstSentence.slice(0, 220);
 }
 
 function extractJson(text: string): string | null {
@@ -1002,7 +1446,239 @@ function persistHistory(records: HistoryRecord[]) {
   localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records));
 }
 
-async function startCamera() {
+async function startAudioRealtimeStreamer(session: Session, stream: MediaStream): Promise<AudioRealtimeStreamer> {
+  const audioTracks = stream.getAudioTracks();
+  if (audioTracks.length === 0) {
+    return {
+      stop: () => ({
+        sentChunks: 0,
+        audioClipBase64: null,
+        audioClipMimeType: null,
+        audioClipBytes: 0,
+      }),
+    };
+  }
+
+  const audioOnlyStream = new MediaStream([audioTracks[0]]);
+  const targetSampleRate = 16000;
+  const audioContext = new AudioContext({ sampleRate: targetSampleRate });
+  await audioContext.resume();
+
+  const source = audioContext.createMediaStreamSource(audioOnlyStream);
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+  let sentChunks = 0;
+  let stopped = false;
+  let totalPcmSamples = 0;
+  const pcmChunks: Int16Array[] = [];
+
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    const pcm16 = downsampleToInt16(input, event.inputBuffer.sampleRate, targetSampleRate);
+    if (pcm16.length === 0) {
+      return;
+    }
+
+    pcmChunks.push(new Int16Array(pcm16));
+    totalPcmSamples += pcm16.length;
+
+    const base64 = int16ToBase64(pcm16);
+    try {
+      session.sendRealtimeInput({
+        media: {
+          mimeType: 'audio/pcm',
+          data: base64,
+        },
+      });
+      sentChunks += 1;
+    } catch {
+      // ignore realtime audio send failure and continue local recording
+    }
+
+    event.outputBuffer.getChannelData(0).fill(0);
+  };
+
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+
+  return {
+    stop: () => {
+      if (stopped) {
+        return {
+          sentChunks,
+          audioClipBase64: null,
+          audioClipMimeType: null,
+          audioClipBytes: 0,
+        };
+      }
+
+      stopped = true;
+      try {
+        source.disconnect();
+      } catch {
+        // ignore disconnect error
+      }
+      try {
+        processor.disconnect();
+      } catch {
+        // ignore disconnect error
+      }
+      processor.onaudioprocess = null;
+      void audioContext.close().catch(() => {
+        // ignore close error
+      });
+
+      try {
+        session.sendRealtimeInput({ audioStreamEnd: true });
+      } catch {
+        // ignore stream end error
+      }
+
+      if (totalPcmSamples <= 0) {
+        return {
+          sentChunks,
+          audioClipBase64: null,
+          audioClipMimeType: null,
+          audioClipBytes: 0,
+        };
+      }
+
+      const mergedPcm = mergeInt16Chunks(pcmChunks, totalPcmSamples);
+      const wavBuffer = encodePcm16ToWav(mergedPcm, targetSampleRate, 1);
+      const audioClipBase64 = arrayBufferToBase64(wavBuffer);
+
+      return {
+        sentChunks,
+        audioClipBase64,
+        audioClipMimeType: 'audio/wav',
+        audioClipBytes: wavBuffer.byteLength,
+      };
+    },
+  };
+}
+
+function downsampleToInt16(
+  input: Float32Array,
+  inputSampleRate: number,
+  targetSampleRate: number,
+): Int16Array {
+  if (input.length === 0) {
+    return new Int16Array();
+  }
+
+  if (inputSampleRate <= targetSampleRate) {
+    return float32ToInt16(input);
+  }
+
+  const ratio = inputSampleRate / targetSampleRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Int16Array(outputLength);
+
+  let outputIndex = 0;
+  let inputIndex = 0;
+
+  while (outputIndex < outputLength) {
+    const nextInputIndex = Math.min(input.length, Math.round((outputIndex + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+    for (let i = inputIndex; i < nextInputIndex; i += 1) {
+      sum += input[i];
+      count += 1;
+    }
+    const sample = count > 0 ? sum / count : 0;
+    const clamped = Math.max(-1, Math.min(1, sample));
+    output[outputIndex] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+
+    outputIndex += 1;
+    inputIndex = nextInputIndex;
+  }
+
+  return output;
+}
+
+function float32ToInt16(input: Float32Array): Int16Array {
+  const output = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i += 1) {
+    const sample = Math.max(-1, Math.min(1, input[i]));
+    output[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return output;
+}
+
+function int16ToBase64(input: Int16Array): string {
+  const bytes = new Uint8Array(input.buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return window.btoa(binary);
+}
+
+function mergeInt16Chunks(chunks: Int16Array[], totalSamples: number): Int16Array {
+  const merged = new Int16Array(totalSamples);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return merged;
+}
+
+function encodePcm16ToWav(samples: Int16Array, sampleRate: number, channels: number): ArrayBuffer {
+  const bytesPerSample = 2;
+  const blockAlign = channels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i += 1) {
+    view.setInt16(offset, samples[i], true);
+    offset += 2;
+  }
+
+  return buffer;
+}
+
+function writeAscii(view: DataView, offset: number, text: string) {
+  for (let i = 0; i < text.length; i += 1) {
+    view.setUint8(offset + i, text.charCodeAt(i));
+  }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return window.btoa(binary);
+}
+
+async function startMediaCapture() {
   stopMedia();
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
@@ -1010,7 +1686,12 @@ async function startCamera() {
       height: { ideal: 720 },
       facingMode: 'environment',
     },
-    audio: false,
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
   });
 
   activeStream = stream;

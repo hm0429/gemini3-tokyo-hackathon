@@ -33,12 +33,18 @@ VITE_GEMINI_API_KEY=YOUR_API_KEY
 # VITE_GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-latest
 # Optional
 # VITE_GEMINI_VOICE_NAME=Kore
+# Optional
+# VITE_GEMINI_JUDGE_NORMALIZER_MODEL=gemini-2.5-flash
+# Optional
+# VITE_GEMINI_JUDGE_FALLBACK_MODEL=gemini-2.5-flash
 ```
 
 既存の `.env` が `GEMINI_API_KEY` になっている場合は、`VITE_` プレフィックス付きの `VITE_GEMINI_API_KEY` に変更してください。
 デフォルトでは Live API の native-audio モデルを順番に試します。固定したい場合は `VITE_GEMINI_LIVE_MODEL` を指定してください。
 native-audio モデルは `TEXT` モダリティで不安定なため、この実装では `AUDIO + outputAudioTranscription` を使って判定テキストを取得しています。
 判定フレーム秒数は `.env` の `VITE_CAPTURE_SECONDS`（1〜60）で変更できます。未指定時は 10 秒です。
+判定正規化モデルを固定したい場合は `VITE_GEMINI_JUDGE_NORMALIZER_MODEL` を指定してください（未指定時は `gemini-2.5-flash` → `gemini-2.0-flash` の順に試行）。
+Live 判定が失敗した時のフォールバックモデルは `VITE_GEMINI_JUDGE_FALLBACK_MODEL` で固定できます（未指定時は `gemini-2.5-flash` → `gemini-2.0-flash`）。
 
 3. 開発サーバー起動
 
@@ -67,6 +73,10 @@ success=true;confidence=0.92;reason=...;detected_actions=action1|action2;safety_
 ```
 
 - 互換性のため JSON 応答もフォールバックで解析
+- 音声は realtime (`audio/pcm`) に加えて、判定ターンへ `audio/wav` クリップも添付して「音声未受信」誤判定を抑制
+- Live 判定ターンが内部エラーの場合は `models.generateContent` へ自動フォールバックして判定継続
+- Live 応答が自由文で崩れた場合は、別モデルへ再入力して `application/json + responseSchema` で正規化してから採点
+- それでも失敗した場合のみ最終フォールバックとして narrative 解析を実施
 
 - `locationCheck` があるお題は GPS の距離判定を追加
   - 指定半径外なら失敗
@@ -74,13 +84,12 @@ success=true;confidence=0.92;reason=...;detected_actions=action1|action2;safety_
 
 ## 既知の制限（MVP）
 
-- 音声ストリーム送信は未実装（現状は動画フレーム中心の判定）
+- 音声・映像を同時送信して判定しますが、騒音環境では音声判定精度が落ちる場合があります
 - 判定は環境光やカメラ角度の影響を受ける
 - お題は固定データ（動的生成は未実装）
 
 ## 次の拡張候補
 
 1. Gemini で動的お題生成（難易度、場所、時間帯でパーソナライズ）
-2. マイク音声の PCM 送信を追加して Live API の音声判定を強化
-3. 不正対策（過去動画のリプレイ検知、顔認識の重複チェック）
-4. チーム対戦、ランキング、時限イベント
+2. 不正対策（過去動画のリプレイ検知、顔認識の重複チェック）
+3. チーム対戦、ランキング、時限イベント
