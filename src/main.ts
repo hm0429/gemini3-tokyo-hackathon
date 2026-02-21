@@ -247,6 +247,15 @@ app.innerHTML = `
         </div>
       </div>
     </section>
+
+    <div id="captureOverlay" class="capture-overlay" aria-hidden="true">
+      <div class="capture-overlay-card">
+        <div class="capture-preview-wrap">
+          <video id="cameraPreviewOverlay" class="capture-preview" playsinline muted></video>
+          <div class="capture-overlay-band" aria-live="polite">Sharing Reality…</div>
+        </div>
+      </div>
+    </div>
   </div>
 `;
 
@@ -258,6 +267,8 @@ const challengePoints = queryEl<HTMLSpanElement>('#challengePoints');
 const locationHint = queryEl<HTMLParagraphElement>('#locationHint');
 const statusText = queryEl<HTMLParagraphElement>('#statusText');
 const preview = queryEl<HTMLVideoElement>('#cameraPreview');
+const overlayPreview = queryEl<HTMLVideoElement>('#cameraPreviewOverlay');
+const captureOverlay = queryEl<HTMLDivElement>('#captureOverlay');
 const sharingOverlay = queryEl<HTMLDivElement>('#sharingOverlay');
 const resultSummary = queryEl<HTMLParagraphElement>('#resultSummary');
 const resultReason = queryEl<HTMLParagraphElement>('#resultReason');
@@ -279,6 +290,7 @@ let history = loadHistory();
 let customChallengeText = loadCustomChallengeText();
 let currentChallenge = customChallengeText ? buildCustomChallenge(customChallengeText) : pickRandomChallenge();
 let isVerifying = false;
+let isCapturing = false;
 let activeStream: MediaStream | null = null;
 let activeSession: Session | null = null;
 
@@ -371,6 +383,7 @@ renderChallenge(currentChallenge);
 renderScore();
 renderHistory();
 renderCustomChallengeState();
+void warmupMissionCamera();
 
 async function verifyCurrentChallenge() {
   if (isVerifying) {
@@ -395,16 +408,25 @@ async function verifyCurrentChallenge() {
 
   try {
     verifyPhase = 'start-media';
-    setStatus('カメラとマイクを起動しています...', 'info');
+    setStatus('Mission Camera とマイクを準備しています...', 'info');
     await startMediaCapture();
 
     const locationSnapshot = await getLocationSnapshot(currentChallenge);
 
     verifyPhase = 'capture-evidence';
     setStatus(`${CAPTURE_SECONDS} 秒間、動作を撮影します。`, 'info');
-    const evidence = await captureEvidence(null, preview, activeStream, CAPTURE_SECONDS, (remainingSeconds) => {
-      setStatus(`撮影中... 残り ${remainingSeconds} 秒`, 'info');
-    });
+    let evidence!: CaptureEvidence;
+    try {
+      isCapturing = true;
+      syncButtonState();
+      await ensureVideoPlaying(overlayPreview);
+      evidence = await captureEvidence(null, preview, activeStream, CAPTURE_SECONDS, (remainingSeconds) => {
+        setStatus(`撮影中... 残り ${remainingSeconds} 秒`, 'info');
+      });
+    } finally {
+      isCapturing = false;
+      syncButtonState();
+    }
     setStatus(
       `収集完了。映像 ${evidence.videoFramesSent} フレーム / 音声 ${evidence.audioChunksSent} チャンクで判定します。`,
       'info',
@@ -487,8 +509,8 @@ async function verifyCurrentChallenge() {
     });
   } finally {
     isVerifying = false;
+    isCapturing = false;
     syncButtonState();
-    stopMedia();
     closeSession();
   }
 }
@@ -598,7 +620,10 @@ function syncButtonState() {
   customChallengeInput.disabled = isVerifying;
   applyCustomChallengeButton.disabled = isVerifying;
   clearCustomChallengeButton.disabled = isVerifying;
-  sharingOverlay.classList.toggle('active', isVerifying);
+  sharingOverlay.classList.toggle('active', isCapturing);
+  captureOverlay.classList.toggle('active', isCapturing);
+  captureOverlay.setAttribute('aria-hidden', String(!isCapturing));
+  document.body.classList.toggle('capture-overlay-open', isCapturing);
 }
 
 function setStatus(message: string, kind: 'info' | 'ok' | 'error') {
@@ -1696,7 +1721,12 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 async function startMediaCapture() {
-  stopMedia();
+  if (activeStream && hasLiveTracks(activeStream)) {
+    attachStreamToPreviews(activeStream);
+    await ensureVideoPlaying(preview);
+    return;
+  }
+
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       width: { ideal: 1280 },
@@ -1712,8 +1742,8 @@ async function startMediaCapture() {
   });
 
   activeStream = stream;
-  preview.srcObject = stream;
-  await preview.play();
+  attachStreamToPreviews(stream);
+  await ensureVideoPlaying(preview);
 }
 
 function stopMedia() {
@@ -1722,6 +1752,7 @@ function stopMedia() {
     activeStream = null;
   }
   preview.srcObject = null;
+  overlayPreview.srcObject = null;
 }
 
 function closeSession() {
@@ -1813,6 +1844,41 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
         reject(error);
       });
   });
+}
+
+async function warmupMissionCamera() {
+  try {
+    await startMediaCapture();
+  } catch (error) {
+    setStatus(
+      `Mission Camera を開始できませんでした。権限を許可して再試行してください。(${stringifyError(error)})`,
+      'error',
+    );
+  }
+}
+
+function hasLiveTracks(stream: MediaStream): boolean {
+  return stream.getTracks().some((track) => track.readyState === 'live');
+}
+
+function attachStreamToPreviews(stream: MediaStream) {
+  if (preview.srcObject !== stream) {
+    preview.srcObject = stream;
+  }
+  if (overlayPreview.srcObject !== stream) {
+    overlayPreview.srcObject = stream;
+  }
+}
+
+async function ensureVideoPlaying(video: HTMLVideoElement) {
+  if (video.srcObject && !video.paused && !video.ended) {
+    return;
+  }
+  try {
+    await video.play();
+  } catch {
+    // ignore autoplay/play interruption; next user gesture will retry.
+  }
 }
 
 function shouldIgnoreSpaceShortcut(target: EventTarget | null): boolean {

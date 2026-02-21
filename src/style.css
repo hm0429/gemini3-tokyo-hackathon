@@ -43,6 +43,10 @@ body {
     linear-gradient(138deg, #f7f0e4 0%, #dceaf1 100%);
 }
 
+body.capture-overlay-open {
+  overflow: hidden;
+}
+
 body::before {
   content: '';
   position: fixed;
@@ -151,9 +155,11 @@ body::before {
 }
 
 .preview {
+  display: block;
   width: 100%;
   min-height: 340px;
   aspect-ratio: 16 / 9;
+  object-fit: cover;
   border-radius: 14px;
   border: 1px solid var(--line-strong);
   background: linear-gradient(160deg, #0f1b27, #1d3043);
@@ -187,6 +193,74 @@ body::before {
 .sharing-overlay.active {
   opacity: 1;
   transform: translateY(0);
+}
+
+.capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 26px;
+  background: rgba(8, 12, 17, 0.68);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.capture-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.capture-overlay-card {
+  width: min(94vw, 1180px);
+  border-radius: 20px;
+  border: 1px solid rgba(226, 242, 255, 0.34);
+  box-shadow: 0 28px 62px rgba(7, 12, 20, 0.52);
+  background: rgba(9, 18, 29, 0.5);
+  padding: 10px;
+  transform: scale(0.92);
+  transition: transform 220ms ease;
+}
+
+.capture-overlay.active .capture-overlay-card {
+  transform: scale(1);
+}
+
+.capture-preview-wrap {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.capture-preview {
+  display: block;
+  width: 100%;
+  min-height: min(76vh, 760px);
+  max-height: 82vh;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid rgba(227, 241, 255, 0.34);
+  background: linear-gradient(160deg, #0f1b27, #1d3043);
+}
+
+.capture-overlay-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(180deg, rgba(6, 14, 24, 0.08), rgba(6, 14, 24, 0.72));
+  color: #f1f7ff;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: clamp(1rem, 1.5vw, 1.16rem);
+  letter-spacing: 0.06em;
+  text-align: center;
 }
 
 .preview-note {
@@ -550,6 +624,15 @@ body::before {
   .debug-grid {
     grid-template-columns: 1fr;
   }
+
+  .capture-overlay {
+    padding: 16px;
+  }
+
+  .capture-overlay-card {
+    width: min(96vw, 1000px);
+    padding: 8px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -573,6 +656,26 @@ body::before {
 
   .preview {
     min-height: 220px;
+  }
+
+  .capture-overlay {
+    padding: 10px;
+  }
+
+  .capture-overlay-card {
+    width: 100%;
+    border-radius: 14px;
+  }
+
+  .capture-preview {
+    min-height: min(72vh, 460px);
+    max-height: 76vh;
+    border-radius: 12px;
+  }
+
+  .capture-overlay-band {
+    font-size: 0.93rem;
+    padding: 11px 12px;
   }
 }
 
