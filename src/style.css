@@ -649,12 +649,29 @@ body::before {
   background: rgba(254, 253, 250, 0.9);
 }
 
+.challenge-source-panel {
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--line-strong);
+}
+
 .custom-challenge-label {
   margin: 0 0 7px;
   color: #3b5260;
   font-family: 'Chakra Petch', sans-serif;
   font-size: 0.83rem;
   letter-spacing: 0.05em;
+}
+
+.challenge-mode-select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: var(--ink);
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 0.86rem;
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .custom-challenge-input {

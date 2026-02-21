@@ -96,13 +96,18 @@ type VisionTasksModule = {
   };
 };
 
+type ChallengeSourceMode = 'fixed' | 'ai';
+type ChallengeRefreshContext = 'user' | 'post-judge' | 'mode-switch';
+
 const STORAGE_KEY = 'reality-quest-state-v1';
 const HISTORY_STORAGE_KEY = 'reality-quest-history-v1';
 const CUSTOM_CHALLENGE_STORAGE_KEY = 'reality-quest-custom-challenge-v1';
+const CHALLENGE_SOURCE_STORAGE_KEY = 'reality-quest-challenge-source-v1';
 const CAPTURE_SECONDS = resolveCaptureSeconds();
 const CUSTOM_CHALLENGE_POINTS = 150;
 const MAX_EVALUATION_FRAMES = 12;
 const JUDGE_NORMALIZER_TIMEOUT_MS = 8000;
+const CHALLENGE_GENERATOR_TIMEOUT_MS = 10000;
 const GESTURE_TRIGGER_ENABLED = resolveGestureTriggerEnabled();
 const GESTURE_WASM_ROOT = resolveGestureWasmRoot();
 const GESTURE_MODEL_ASSET_PATH = resolveGestureModelAssetPath();
@@ -191,6 +196,14 @@ app.innerHTML = `
         <div class="panel-lite">
           <h3 class="debug-title">Custom Challenge</h3>
           <div class="custom-challenge-panel">
+            <div class="challenge-source-panel">
+              <p class="custom-challenge-label">Challenge Source</p>
+              <select id="challengeModeSelect" class="challenge-mode-select">
+                <option value="fixed">Fixed Challenges</option>
+                <option value="ai">AI Generated (Realtime)</option>
+              </select>
+              <p id="challengeModeMeta" class="custom-challenge-meta"></p>
+            </div>
             <p class="custom-challenge-label">Debug Custom Challenge</p>
             <textarea id="customChallengeInput" class="custom-challenge-input" placeholder="Example: Do 5 squats in front of Hachiko"></textarea>
             <div class="custom-challenge-actions">
@@ -261,12 +274,16 @@ const customChallengeInput = queryEl<HTMLTextAreaElement>('#customChallengeInput
 const applyCustomChallengeButton = queryEl<HTMLButtonElement>('#applyCustomChallengeButton');
 const clearCustomChallengeButton = queryEl<HTMLButtonElement>('#clearCustomChallengeButton');
 const customChallengeMeta = queryEl<HTMLParagraphElement>('#customChallengeMeta');
+const challengeModeSelect = queryEl<HTMLSelectElement>('#challengeModeSelect');
+const challengeModeMeta = queryEl<HTMLParagraphElement>('#challengeModeMeta');
 
 let appState = loadState();
 let history = loadHistory();
 let customChallengeText = loadCustomChallengeText();
+let challengeSourceMode = loadChallengeSourceMode();
 let currentChallenge = customChallengeText ? buildCustomChallenge(customChallengeText) : pickRandomChallenge();
 let isVerifying = false;
+let isGeneratingChallenge = false;
 let isCapturing = false;
 let isDigesting = false;
 let activeStream: MediaStream | null = null;
@@ -282,18 +299,10 @@ let gestureRetryAfterMs = 0;
 let outcomeHideTimeoutId: number | null = null;
 
 newChallengeButton.addEventListener('click', () => {
-  if (isVerifying) {
+  if (isVerifying || isGeneratingChallenge) {
     return;
   }
-  if (customChallengeText) {
-    currentChallenge = buildCustomChallenge(customChallengeText);
-    renderChallenge(currentChallenge);
-    setStatus('Custom challenge mode is active. Clear it to return to random missions.', 'info');
-    return;
-  }
-  currentChallenge = pickRandomChallenge(currentChallenge.id);
-  renderChallenge(currentChallenge);
-  setStatus('A new mission has been set.', 'info');
+  void refreshChallengeBySource(currentChallenge.id, 'user');
 });
 
 verifyButton.addEventListener('click', () => {
@@ -314,7 +323,7 @@ resetScoreButton.addEventListener('click', () => {
 });
 
 applyCustomChallengeButton.addEventListener('click', () => {
-  if (isVerifying) {
+  if (isVerifying || isGeneratingChallenge) {
     return;
   }
 
@@ -333,7 +342,7 @@ applyCustomChallengeButton.addEventListener('click', () => {
 });
 
 clearCustomChallengeButton.addEventListener('click', () => {
-  if (isVerifying) {
+  if (isVerifying || isGeneratingChallenge) {
     return;
   }
   if (!customChallengeText) {
@@ -343,10 +352,26 @@ clearCustomChallengeButton.addEventListener('click', () => {
 
   customChallengeText = null;
   persistCustomChallengeText(customChallengeText);
-  currentChallenge = pickRandomChallenge();
-  renderChallenge(currentChallenge);
+  void refreshChallengeBySource(currentChallenge.id, 'user');
   renderCustomChallengeState();
   setStatus('Custom challenge cleared. Back to random missions.', 'info');
+});
+
+challengeModeSelect.addEventListener('change', () => {
+  if (isVerifying || isGeneratingChallenge) {
+    challengeModeSelect.value = challengeSourceMode;
+    return;
+  }
+
+  const nextMode: ChallengeSourceMode = challengeModeSelect.value === 'ai' ? 'ai' : 'fixed';
+  if (nextMode === challengeSourceMode) {
+    return;
+  }
+
+  challengeSourceMode = nextMode;
+  persistChallengeSourceMode(challengeSourceMode);
+  renderChallengeModeState();
+  void refreshChallengeBySource(currentChallenge.id, 'mode-switch');
 });
 
 window.addEventListener('keydown', (event) => {
@@ -371,11 +396,15 @@ window.addEventListener('beforeunload', () => {
 renderChallenge(currentChallenge);
 renderScore();
 renderHistory();
+renderChallengeModeState();
 renderCustomChallengeState();
+if (!customChallengeText && challengeSourceMode === 'ai') {
+  void refreshChallengeBySource(currentChallenge.id, 'mode-switch');
+}
 void warmupMissionCamera();
 
 async function verifyCurrentChallenge() {
-  if (isVerifying) {
+  if (isVerifying || isGeneratingChallenge) {
     return;
   }
 
@@ -488,8 +517,7 @@ async function verifyCurrentChallenge() {
     renderResult(finalJudgement);
     showOutcomeOverlay(finalJudgement);
     appendHistory(finalJudgement, currentChallenge);
-    currentChallenge = nextChallengeAfterJudge(currentChallenge.id);
-    renderChallenge(currentChallenge);
+    void refreshChallengeBySource(currentChallenge.id, 'post-judge');
 
     setStatus(
       finalJudgement.success ? `Success! +${finalJudgement.scoreAdded} pt` : 'Failed this round. Moving to the next mission.',
@@ -611,16 +639,26 @@ function renderCustomChallengeState() {
   customChallengeMeta.textContent = `Current mode: Custom challenge mode (+${CUSTOM_CHALLENGE_POINTS} pt)`;
 }
 
+function renderChallengeModeState() {
+  challengeModeSelect.value = challengeSourceMode;
+  challengeModeMeta.textContent =
+    challengeSourceMode === 'ai'
+      ? 'Current source: AI-generated missions'
+      : 'Current source: Fixed mission pool';
+}
+
 function syncButtonState() {
   const showCaptureOverlay = isCapturing;
   const showDigestOverlay = isDigesting && !isCapturing;
+  const controlsBusy = isVerifying || isGeneratingChallenge;
 
-  verifyButton.disabled = isVerifying;
-  newChallengeButton.disabled = isVerifying;
-  resetScoreButton.disabled = isVerifying;
-  customChallengeInput.disabled = isVerifying;
-  applyCustomChallengeButton.disabled = isVerifying;
-  clearCustomChallengeButton.disabled = isVerifying;
+  verifyButton.disabled = controlsBusy;
+  newChallengeButton.disabled = controlsBusy;
+  resetScoreButton.disabled = controlsBusy;
+  customChallengeInput.disabled = controlsBusy;
+  applyCustomChallengeButton.disabled = controlsBusy;
+  clearCustomChallengeButton.disabled = controlsBusy;
+  challengeModeSelect.disabled = controlsBusy;
   sharingOverlay.classList.toggle('active', showCaptureOverlay);
   captureOverlay.classList.toggle('active', showCaptureOverlay);
   captureOverlay.setAttribute('aria-hidden', String(!showCaptureOverlay));
@@ -1419,16 +1457,46 @@ function extractJson(text: string): string | null {
   return match ? match[0] : null;
 }
 
-function nextChallengeAfterJudge(excludedId?: string): Challenge {
-  if (customChallengeText) {
-    return buildCustomChallenge(customChallengeText);
-  }
-  return pickRandomChallenge(excludedId);
-}
-
 function pickRandomChallenge(excludedId?: string) {
   const candidates = FIXED_CHALLENGES.filter((challenge) => challenge.id !== excludedId);
   return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+async function refreshChallengeBySource(excludedId: string | undefined, context: ChallengeRefreshContext) {
+  if (isGeneratingChallenge) {
+    return;
+  }
+
+  if (customChallengeText) {
+    currentChallenge = buildCustomChallenge(customChallengeText);
+    renderChallenge(currentChallenge);
+    if (context !== 'post-judge') {
+      setStatus('Custom challenge mode is active. Clear it to use generated or fixed missions.', 'info');
+    }
+    return;
+  }
+
+  isGeneratingChallenge = true;
+  syncButtonState();
+
+  try {
+    const shouldNotify = context !== 'post-judge';
+    if (challengeSourceMode === 'ai') {
+      const generated = await generateAiChallenge(excludedId, shouldNotify);
+      currentChallenge = generated ?? pickRandomChallenge(excludedId);
+      renderChallenge(currentChallenge);
+      return;
+    }
+
+    currentChallenge = pickRandomChallenge(excludedId);
+    renderChallenge(currentChallenge);
+    if (shouldNotify) {
+      setStatus('A new fixed mission has been set.', 'info');
+    }
+  } finally {
+    isGeneratingChallenge = false;
+    syncButtonState();
+  }
 }
 
 function buildCustomChallenge(text: string): Challenge {
@@ -1462,6 +1530,157 @@ function persistCustomChallengeText(text: string | null) {
     return;
   }
   localStorage.setItem(CUSTOM_CHALLENGE_STORAGE_KEY, text);
+}
+
+async function generateAiChallenge(excludedId: string | undefined, notifyStatus: boolean): Promise<Challenge | null> {
+  const apiKey = (import.meta.env.VITE_GEMINI_API_KEY ?? '').trim();
+  if (!apiKey) {
+    if (notifyStatus) {
+      setStatus('AI challenge mode requires VITE_GEMINI_API_KEY. Falling back to fixed missions.', 'error');
+    }
+    return null;
+  }
+
+  if (notifyStatus) {
+    setStatus('Generating mission with AI...', 'info');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const models = resolveChallengeGeneratorModelCandidates();
+  const errors: string[] = [];
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING },
+      description: { type: Type.STRING },
+      points: { type: Type.NUMBER },
+    },
+    required: ['title', 'description', 'points'],
+  };
+
+  for (const modelName of models) {
+    try {
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: modelName,
+          contents: buildChallengeGenerationPrompt(currentChallenge),
+          config: {
+            temperature: 0.9,
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        }),
+        CHALLENGE_GENERATOR_TIMEOUT_MS,
+        `Challenge generator model (${modelName}) timed out`,
+      );
+
+      const payloadText = (response.text ?? '').trim();
+      if (!payloadText) {
+        errors.push(`${modelName}: empty response`);
+        continue;
+      }
+
+      const parsed = parseAiChallengePayload(payloadText, excludedId);
+      if (!parsed) {
+        errors.push(`${modelName}: invalid payload`);
+        continue;
+      }
+
+      if (notifyStatus) {
+        setStatus('AI generated a new mission.', 'ok');
+      }
+      return parsed;
+    } catch (error) {
+      errors.push(`${modelName}: ${stringifyError(error)}`);
+    }
+  }
+
+  if (notifyStatus) {
+    setStatus('AI generation failed. Falling back to fixed missions.', 'error');
+  }
+  if (errors.length > 0) {
+    console.warn('ai-challenge-generation-failed', errors.join(' | '));
+  }
+  return null;
+}
+
+function resolveChallengeGeneratorModelCandidates(): string[] {
+  const configured = (import.meta.env.VITE_GEMINI_CHALLENGE_MODEL ?? '').trim();
+  if (configured) {
+    return [configured];
+  }
+
+  return ['gemini-2.5-flash', 'gemini-2.0-flash'];
+}
+
+function buildChallengeGenerationPrompt(previousChallenge: Challenge): string {
+  return [
+    'Generate exactly one real-world challenge for a mobile/web camera game.',
+    'Requirements:',
+    '- Safe and legal in public spaces.',
+    '- Family-friendly.',
+    '- Can be verified through short video/audio capture.',
+    '- Avoid requiring a specific city/place.',
+    '- Keep it short and concrete.',
+    '- Do not mention JSON, schema, or formatting instructions in the output fields.',
+    `Previous challenge title (avoid repeating): ${previousChallenge.title}`,
+  ].join('\n');
+}
+
+function parseAiChallengePayload(payloadText: string, excludedId?: string): Challenge | null {
+  const jsonCandidate = extractJson(payloadText) ?? payloadText;
+
+  try {
+    const parsed = JSON.parse(jsonCandidate) as {
+      title?: unknown;
+      description?: unknown;
+      points?: unknown;
+    };
+
+    const title = typeof parsed.title === 'string' ? parsed.title.trim() : '';
+    const description = typeof parsed.description === 'string' ? parsed.description.trim() : '';
+    const pointsRaw = typeof parsed.points === 'number' ? parsed.points : Number(parsed.points);
+
+    if (!title || !description) {
+      return null;
+    }
+
+    const points = clamp(Math.round(Number.isFinite(pointsRaw) ? pointsRaw : 150), 80, 320);
+    let id = `ai-${slugify(title)}`;
+    if (id === 'ai-' || id === `ai-${excludedId}`) {
+      id = `ai-${Date.now()}`;
+    }
+
+    return {
+      id,
+      title: title.slice(0, 60),
+      description: description.slice(0, 220),
+      points,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
+function loadChallengeSourceMode(): ChallengeSourceMode {
+  const raw = localStorage.getItem(CHALLENGE_SOURCE_STORAGE_KEY);
+  if (raw === 'ai') {
+    return 'ai';
+  }
+  return 'fixed';
+}
+
+function persistChallengeSourceMode(mode: ChallengeSourceMode) {
+  localStorage.setItem(CHALLENGE_SOURCE_STORAGE_KEY, mode);
 }
 
 function loadState(): AppState {

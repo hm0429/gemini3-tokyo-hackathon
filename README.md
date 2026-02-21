@@ -38,6 +38,8 @@ VITE_GEMINI_API_KEY=YOUR_API_KEY
 # Optional
 # VITE_GEMINI_JUDGE_NORMALIZER_MODEL=gemini-2.5-flash
 # Optional
+# VITE_GEMINI_CHALLENGE_MODEL=gemini-2.5-flash
+# Optional
 # VITE_GEMINI_JUDGE_FALLBACK_MODEL=gemini-2.5-flash
 ```
 
@@ -47,6 +49,7 @@ If you previously used `GEMINI_API_KEY`, rename it to `VITE_GEMINI_API_KEY`.
 - Finger-circle gesture can trigger `Share Reality`; disable with `VITE_GESTURE_TRIGGER_ENABLED=false`.
 - Fix gesture model sources with `VITE_GESTURE_WASM_ROOT` and `VITE_GESTURE_MODEL_ASSET_PATH` if needed.
 - You can pin the normalizer model with `VITE_GEMINI_JUDGE_NORMALIZER_MODEL` (default tries `gemini-2.5-flash` then `gemini-2.0-flash`).
+- You can pin the AI challenge generator model with `VITE_GEMINI_CHALLENGE_MODEL` (default tries `gemini-2.5-flash` then `gemini-2.0-flash`).
 - You can pin the judge model with `VITE_GEMINI_JUDGE_FALLBACK_MODEL` (default tries `gemini-2.5-flash` then `gemini-2.0-flash`).
 
 3. Start dev server
@@ -59,12 +62,13 @@ npm run dev
 
 ## How to Play
 
-1. Pick a random mission with `Maybe Later...`
-2. Perform the mission in the real world
-3. Start verification with `Share Reality` or a finger-circle gesture in front of your face
-4. The app captures camera + microphone data for the configured duration and judges via `models.generateContent`
-5. Points are added on success
-6. For debug mode, enter a custom challenge and click `Set Custom Challenge`
+1. In Debug Screen, choose `Challenge Source`: `Fixed Challenges` or `AI Generated (Realtime)` (default is fixed)
+2. Pick a mission with `Maybe Later...`
+3. Perform the mission in the real world
+4. Start verification with `Share Reality` or a finger-circle gesture in front of your face
+5. The app captures camera + microphone data for the configured duration and judges via `models.generateContent`
+6. Points are added on success
+7. For debug mode, enter a custom challenge and click `Set Custom Challenge`
 
 ## Judgement Logic
 
@@ -90,7 +94,7 @@ For `locationCheck` missions:
 
 - Noisy environments can reduce audio judgement quality.
 - Lighting and camera angle can affect visual judgement.
-- Challenges are fixed data only (dynamic generation not implemented yet).
+- AI-generated missions can occasionally be repetitive or low quality.
 
 ## Next Extensions
 
