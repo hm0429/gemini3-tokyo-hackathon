@@ -728,6 +728,29 @@ body::before {
   border-bottom: 1px dashed var(--line-strong);
 }
 
+.status-visibility-panel {
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--line-strong);
+}
+
+.status-visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #3b5260;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 0.83rem;
+  letter-spacing: 0.03em;
+}
+
+.status-visibility-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .custom-challenge-label {
   margin: 0 0 7px;
   color: #3b5260;

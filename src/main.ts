@@ -103,6 +103,7 @@ const STORAGE_KEY = 'reality-quest-state-v1';
 const HISTORY_STORAGE_KEY = 'reality-quest-history-v1';
 const CUSTOM_CHALLENGE_STORAGE_KEY = 'reality-quest-custom-challenge-v1';
 const CHALLENGE_SOURCE_STORAGE_KEY = 'reality-quest-challenge-source-v1';
+const STATUS_TEXT_VISIBLE_STORAGE_KEY = 'reality-quest-status-text-visible-v1';
 const CAPTURE_SECONDS = resolveCaptureSeconds();
 const CUSTOM_CHALLENGE_POINTS = 150;
 const MAX_EVALUATION_FRAMES = 12;
@@ -213,6 +214,12 @@ app.innerHTML = `
               </select>
               <p id="challengeModeMeta" class="custom-challenge-meta"></p>
             </div>
+            <div class="status-visibility-panel">
+              <label for="statusTextToggle" class="status-visibility-toggle">
+                <input id="statusTextToggle" type="checkbox" checked />
+                <span>Show Status Text</span>
+              </label>
+            </div>
             <p class="custom-challenge-label">Debug Custom Challenge</p>
             <textarea id="customChallengeInput" class="custom-challenge-input" placeholder="Example: Do 5 squats in front of Hachiko"></textarea>
             <div class="custom-challenge-actions">
@@ -289,11 +296,13 @@ const clearCustomChallengeButton = queryEl<HTMLButtonElement>('#clearCustomChall
 const customChallengeMeta = queryEl<HTMLParagraphElement>('#customChallengeMeta');
 const challengeModeSelect = queryEl<HTMLSelectElement>('#challengeModeSelect');
 const challengeModeMeta = queryEl<HTMLParagraphElement>('#challengeModeMeta');
+const statusTextToggle = queryEl<HTMLInputElement>('#statusTextToggle');
 
 let appState = loadState();
 let history = loadHistory();
 let customChallengeText = loadCustomChallengeText();
 let challengeSourceMode = loadChallengeSourceMode();
+let isStatusTextVisible = loadStatusTextVisible();
 let currentChallenge = customChallengeText ? buildCustomChallenge(customChallengeText) : pickRandomChallenge();
 let isVerifying = false;
 let isGeneratingChallenge = false;
@@ -387,6 +396,17 @@ challengeModeSelect.addEventListener('change', () => {
   void refreshChallengeBySource(currentChallenge.id, 'mode-switch');
 });
 
+statusTextToggle.addEventListener('change', () => {
+  if (isVerifying || isGeneratingChallenge) {
+    statusTextToggle.checked = isStatusTextVisible;
+    return;
+  }
+
+  isStatusTextVisible = statusTextToggle.checked;
+  persistStatusTextVisible(isStatusTextVisible);
+  applyStatusTextVisibility();
+});
+
 window.addEventListener('keydown', (event) => {
   if (event.code !== 'Space' || event.repeat) {
     return;
@@ -410,6 +430,7 @@ renderChallenge(currentChallenge);
 renderScore();
 renderHistory();
 renderChallengeModeState();
+renderStatusTextToggleState();
 renderCustomChallengeState();
 if (!customChallengeText && challengeSourceMode === 'ai') {
   void refreshChallengeBySource(currentChallenge.id, 'mode-switch');
@@ -671,6 +692,11 @@ function renderChallengeModeState() {
       : 'Current source: Fixed mission pool';
 }
 
+function renderStatusTextToggleState() {
+  statusTextToggle.checked = isStatusTextVisible;
+  applyStatusTextVisibility();
+}
+
 function syncButtonState() {
   const showCaptureOverlay = isCapturing;
   const showDigestOverlay = isDigesting && !isCapturing;
@@ -683,12 +709,18 @@ function syncButtonState() {
   applyCustomChallengeButton.disabled = controlsBusy;
   clearCustomChallengeButton.disabled = controlsBusy;
   challengeModeSelect.disabled = controlsBusy;
+  statusTextToggle.disabled = controlsBusy;
   sharingOverlay.classList.toggle('active', showCaptureOverlay);
   captureOverlay.classList.toggle('active', showCaptureOverlay);
   captureOverlay.setAttribute('aria-hidden', String(!showCaptureOverlay));
   digestOverlay.classList.toggle('active', showDigestOverlay);
   digestOverlay.setAttribute('aria-hidden', String(!showDigestOverlay));
   document.body.classList.toggle('capture-overlay-open', showCaptureOverlay || showDigestOverlay);
+}
+
+function applyStatusTextVisibility() {
+  statusText.hidden = !isStatusTextVisible;
+  statusText.setAttribute('aria-hidden', String(!isStatusTextVisible));
 }
 
 function setStatus(message: string, kind: 'info' | 'ok' | 'error') {
@@ -1705,6 +1737,18 @@ function loadChallengeSourceMode(): ChallengeSourceMode {
 
 function persistChallengeSourceMode(mode: ChallengeSourceMode) {
   localStorage.setItem(CHALLENGE_SOURCE_STORAGE_KEY, mode);
+}
+
+function loadStatusTextVisible(): boolean {
+  const raw = localStorage.getItem(STATUS_TEXT_VISIBLE_STORAGE_KEY);
+  if (raw === null) {
+    return true;
+  }
+  return raw === 'true';
+}
+
+function persistStatusTextVisible(visible: boolean) {
+  localStorage.setItem(STATUS_TEXT_VISIBLE_STORAGE_KEY, String(visible));
 }
 
 function loadState(): AppState {
