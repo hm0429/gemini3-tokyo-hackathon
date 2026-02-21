@@ -291,6 +291,7 @@ body::before {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   text-shadow: 0 0 20px rgba(124, 201, 255, 0.32);
+  animation: digestTextWobble 900ms ease-in-out infinite;
 }
 
 .outcome-overlay {
@@ -900,6 +901,33 @@ body::before {
   }
   100% {
     transform: translateX(0);
+  }
+}
+
+@keyframes digestTextWobble {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) skewX(0deg);
+    text-shadow: 0 0 18px rgba(124, 201, 255, 0.3);
+  }
+  20% {
+    transform: translate3d(5px, -3px, 0) rotate(-2.2deg) skewX(-7deg);
+    text-shadow: -2px 0 0 rgba(94, 197, 255, 0.45), 2px 0 0 rgba(173, 231, 255, 0.38), 0 0 24px rgba(124, 201, 255, 0.5);
+  }
+  40% {
+    transform: translate3d(-5px, 4px, 0) rotate(2.3deg) skewX(7deg);
+    text-shadow: -2px 0 0 rgba(173, 231, 255, 0.38), 2px 0 0 rgba(94, 197, 255, 0.45), 0 0 26px rgba(124, 201, 255, 0.55);
+  }
+  60% {
+    transform: translate3d(4px, 2px, 0) rotate(-1.6deg) skewX(-5deg);
+    text-shadow: -1px 0 0 rgba(94, 197, 255, 0.4), 1px 0 0 rgba(173, 231, 255, 0.34), 0 0 22px rgba(124, 201, 255, 0.48);
+  }
+  80% {
+    transform: translate3d(-4px, -2px, 0) rotate(1.7deg) skewX(5deg);
+    text-shadow: -1px 0 0 rgba(173, 231, 255, 0.34), 1px 0 0 rgba(94, 197, 255, 0.4), 0 0 22px rgba(124, 201, 255, 0.48);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) skewX(0deg);
+    text-shadow: 0 0 18px rgba(124, 201, 255, 0.3);
   }
 }
 
