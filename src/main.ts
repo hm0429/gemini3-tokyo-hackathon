@@ -186,7 +186,7 @@ app.innerHTML = `
         </div>
         <div class="preview-wrap">
           <video id="cameraPreview" class="preview" playsinline muted></video>
-          <div id="sharingOverlay" class="sharing-overlay" aria-live="polite">Experiencing your world…</div>
+          <div id="sharingOverlay" class="sharing-overlay" aria-live="polite">Sharing Reality…</div>
         </div>
         <p class="preview-note">判定時に映像と音声を収集し、モデルで達成可否を判定します。</p>
       </section>
