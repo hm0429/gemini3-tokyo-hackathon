@@ -147,8 +147,8 @@ if (!app) {
 app.innerHTML = `
   <div class="shell">
     <header class="hero">
-      <p class="eyebrow">REAL WORLD QUEST</p>
-      <h1>AI お題ミッション</h1>
+      <p class="eyebrow">ACTION SCORE ADVENTURE</p>
+      <h1>The World Quest</h1>
       <p class="lead">AI がランダムなお題を出題し、Gemini Live API が実行可否を判定します。</p>
     </header>
 
