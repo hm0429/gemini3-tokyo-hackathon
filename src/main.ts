@@ -353,29 +353,17 @@ async function verifyCurrentChallenge() {
     setStatus('カメラとマイクを起動しています...', 'info');
     await startMediaCapture();
 
-    verifyPhase = 'capture-session-connect';
     const locationSnapshot = await getLocationSnapshot(currentChallenge);
-    const { session: captureSession, modelName: captureModelName } = await createLiveSession(apiKey);
-    activeSession = captureSession;
 
     verifyPhase = 'capture-evidence';
-    setStatus(`${captureModelName} へ接続完了。${CAPTURE_SECONDS} 秒間、動作を撮影します。`, 'info');
-    const evidence = await captureEvidence(captureSession, preview, activeStream, CAPTURE_SECONDS, (remainingSeconds) => {
+    setStatus(`${CAPTURE_SECONDS} 秒間、動作を撮影します。`, 'info');
+    const evidence = await captureEvidence(null, preview, activeStream, CAPTURE_SECONDS, (remainingSeconds) => {
       setStatus(`撮影中... 残り ${remainingSeconds} 秒`, 'info');
     });
     setStatus(
       `収集完了。映像 ${evidence.videoFramesSent} フレーム / 音声 ${evidence.audioChunksSent} チャンクで判定します。`,
       'info',
     );
-
-    try {
-      captureSession.close();
-    } catch {
-      // ignore close error
-    }
-    if (activeSession === captureSession) {
-      activeSession = null;
-    }
 
     const evaluationPrompt = buildEvaluationPrompt(currentChallenge, locationSnapshot, Boolean(evidence.audioClipBase64));
     const evaluationParts: Array<{ inlineData: { mimeType: string; data: string } } | { text: string }> = [
@@ -398,36 +386,13 @@ async function verifyCurrentChallenge() {
         : []),
     ];
 
-    let rawText = '';
-    let judgeTransport: 'live' | 'generate-content-fallback' = 'live';
-    let judgeModelUsed = '';
-    let judgeLiveError: string | null = null;
-
-    try {
-      verifyPhase = 'judge-session-connect';
-      const { session: judgeSession, responsePromise, modelName, armJudgeTurn } = await createLiveSession(apiKey);
-      activeSession = judgeSession;
-      judgeModelUsed = modelName;
-      setStatus(`${modelName} で最終判定を実行します。`, 'info');
-
-      verifyPhase = 'judge-turn';
-      armJudgeTurn();
-      judgeSession.sendClientContent({
-        turns: [{ role: 'user', parts: evaluationParts }],
-        turnComplete: true,
-      });
-
-      rawText = await withTimeout(responsePromise, 20000, 'モデルの応答がタイムアウトしました');
-    } catch (error) {
-      judgeLiveError = stringifyError(error);
-      closeSession();
-      verifyPhase = 'judge-fallback-model';
-      setStatus(`Live 判定エラー (${judgeLiveError})。フォールバック判定を実行します。`, 'info');
-      const fallback = await runFallbackJudgeWithGenerateContent(apiKey, evaluationParts);
-      rawText = fallback.rawText;
-      judgeModelUsed = fallback.modelName;
-      judgeTransport = 'generate-content-fallback';
-    }
+    verifyPhase = 'judge-fallback-model';
+    setStatus('モデル判定を実行します。', 'info');
+    const fallback = await runFallbackJudgeWithGenerateContent(apiKey, evaluationParts);
+    const rawText = fallback.rawText;
+    const judgeTransport: 'generate-content-direct' = 'generate-content-direct';
+    const judgeModelUsed = fallback.modelName;
+    const judgeLiveError: string | null = null;
 
     verifyPhase = 'parse-result';
     const parsed = await parseJudgeResult(rawText, apiKey, currentChallenge);
@@ -726,7 +691,7 @@ function resolveVoiceName(): string {
 }
 
 async function captureEvidence(
-  session: Session,
+  session: Session | null,
   video: HTMLVideoElement,
   stream: MediaStream | null,
   seconds: number,
@@ -770,17 +735,19 @@ async function captureEvidence(
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
     const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+    videoFramesSent += 1;
 
-    try {
-      session.sendRealtimeInput({
-        media: {
-          mimeType: 'image/jpeg',
-          data: base64,
-        },
-      });
-      videoFramesSent += 1;
-    } catch {
-      // ignore realtime video send failure and continue local capture
+    if (session) {
+      try {
+        session.sendRealtimeInput({
+          media: {
+            mimeType: 'image/jpeg',
+            data: base64,
+          },
+        });
+      } catch {
+        // ignore realtime video send failure and continue local capture
+      }
     }
 
     const shouldSample = elapsed % sampleInterval === 0 || elapsed === seconds - 1;
@@ -1446,7 +1413,7 @@ function persistHistory(records: HistoryRecord[]) {
   localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records));
 }
 
-async function startAudioRealtimeStreamer(session: Session, stream: MediaStream): Promise<AudioRealtimeStreamer> {
+async function startAudioRealtimeStreamer(session: Session | null, stream: MediaStream): Promise<AudioRealtimeStreamer> {
   const audioTracks = stream.getAudioTracks();
   if (audioTracks.length === 0) {
     return {
@@ -1481,18 +1448,20 @@ async function startAudioRealtimeStreamer(session: Session, stream: MediaStream)
 
     pcmChunks.push(new Int16Array(pcm16));
     totalPcmSamples += pcm16.length;
+    sentChunks += 1;
 
-    const base64 = int16ToBase64(pcm16);
-    try {
-      session.sendRealtimeInput({
-        media: {
-          mimeType: 'audio/pcm',
-          data: base64,
-        },
-      });
-      sentChunks += 1;
-    } catch {
-      // ignore realtime audio send failure and continue local recording
+    if (session) {
+      const base64 = int16ToBase64(pcm16);
+      try {
+        session.sendRealtimeInput({
+          media: {
+            mimeType: 'audio/pcm',
+            data: base64,
+          },
+        });
+      } catch {
+        // ignore realtime audio send failure and continue local recording
+      }
     }
 
     event.outputBuffer.getChannelData(0).fill(0);
@@ -1528,10 +1497,12 @@ async function startAudioRealtimeStreamer(session: Session, stream: MediaStream)
         // ignore close error
       });
 
-      try {
-        session.sendRealtimeInput({ audioStreamEnd: true });
-      } catch {
-        // ignore stream end error
+      if (session) {
+        try {
+          session.sendRealtimeInput({ audioStreamEnd: true });
+        } catch {
+          // ignore stream end error
+        }
       }
 
       if (totalPcmSamples <= 0) {

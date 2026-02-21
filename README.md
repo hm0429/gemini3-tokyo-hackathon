@@ -5,7 +5,7 @@ AI が実世界のお題を出し、人間が行動して達成するとスコ�
 この MVP では以下を実装しています。
 
 - 固定お題からランダム出題
-- Gemini Live API でカメラフレームを解析して達成判定
+- Gemini API で映像+音声を解析して達成判定
 - 成功時のスコア加算と連続成功ストリーク
 - 履歴表示
 - 位置が重要なお題のみ GPS 取得して補助判定（取得できない場合はスキップ）
@@ -13,7 +13,7 @@ AI が実世界のお題を出し、人間が行動して達成するとスコ�
 ## 技術スタック
 
 - Web: Vite + TypeScript
-- AI 判定: [@google/genai](https://www.npmjs.com/package/@google/genai) の Live API (`live.connect`)
+- AI 判定: [@google/genai](https://www.npmjs.com/package/@google/genai) の `models.generateContent`（マルチモーダル）
 
 ## セットアップ
 
@@ -30,21 +30,15 @@ VITE_GEMINI_API_KEY=YOUR_API_KEY
 # Optional
 # VITE_CAPTURE_SECONDS=10
 # Optional
-# VITE_GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-latest
-# Optional
-# VITE_GEMINI_VOICE_NAME=Kore
-# Optional
 # VITE_GEMINI_JUDGE_NORMALIZER_MODEL=gemini-2.5-flash
 # Optional
 # VITE_GEMINI_JUDGE_FALLBACK_MODEL=gemini-2.5-flash
 ```
 
 既存の `.env` が `GEMINI_API_KEY` になっている場合は、`VITE_` プレフィックス付きの `VITE_GEMINI_API_KEY` に変更してください。
-デフォルトでは Live API の native-audio モデルを順番に試します。固定したい場合は `VITE_GEMINI_LIVE_MODEL` を指定してください。
-native-audio モデルは `TEXT` モダリティで不安定なため、この実装では `AUDIO + outputAudioTranscription` を使って判定テキストを取得しています。
 判定フレーム秒数は `.env` の `VITE_CAPTURE_SECONDS`（1〜60）で変更できます。未指定時は 10 秒です。
 判定正規化モデルを固定したい場合は `VITE_GEMINI_JUDGE_NORMALIZER_MODEL` を指定してください（未指定時は `gemini-2.5-flash` → `gemini-2.0-flash` の順に試行）。
-Live 判定が失敗した時のフォールバックモデルは `VITE_GEMINI_JUDGE_FALLBACK_MODEL` で固定できます（未指定時は `gemini-2.5-flash` → `gemini-2.0-flash`）。
+判定モデルを固定したい場合は `VITE_GEMINI_JUDGE_FALLBACK_MODEL` を指定してください（未指定時は `gemini-2.5-flash` → `gemini-2.0-flash`）。
 
 3. 開発サーバー起動
 
@@ -59,7 +53,7 @@ npm run dev
 1. 「次のお題」でランダムお題を選択
 2. 実世界でお題を実行
 3. 「実行を判定する」を押す
-4. 10 秒間のカメラフレームが Gemini Live API に送られ、1行フォーマットの判定結果が返る
+4. 10 秒間のカメラ映像と音声を収集し、`models.generateContent` で判定する
 5. 成功時にポイント加算
 6. Debug カスタムお題を使う場合は、画面の入力欄にお題文を入れて「カスタムお題をセット」を押す
 
@@ -73,8 +67,8 @@ success=true;confidence=0.92;reason=...;detected_actions=action1|action2;safety_
 ```
 
 - 互換性のため JSON 応答もフォールバックで解析
-- 音声は realtime (`audio/pcm`) に加えて、判定ターンへ `audio/wav` クリップも添付して「音声未受信」誤判定を抑制
-- Live 判定ターンが内部エラーの場合は `models.generateContent` へ自動フォールバックして判定継続
+- 最初から `models.generateContent` で判定（Live 判定は使用しない）
+- 音声は `audio/wav` クリップを添付して判定
 - Live 応答が自由文で崩れた場合は、別モデルへ再入力して `application/json + responseSchema` で正規化してから採点
 - それでも失敗した場合のみ最終フォールバックとして narrative 解析を実施
 
