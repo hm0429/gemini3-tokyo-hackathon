@@ -128,17 +128,17 @@ const GESTURE_EXTENSION_RATIO = 1.08;
 const FIXED_CHALLENGES: Challenge[] = [
   {
     id: 'white-glasses-person',
-    title: '街角スカウト',
-    description: 'メガネをかけて白い服を着ている人を探して、同じフレームに入ってください。',
+    title: 'Street Scout',
+    description: 'Find a person wearing glasses and white clothes, then get into the same frame.',
     points: 120,
   },
   {
     id: 'hachiko-squats',
-    title: 'ハチ公チャレンジ',
-    description: 'ハチ公前のエリアでスクワットを 5 回行ってください。',
+    title: 'Hachiko Challenge',
+    description: 'Do 5 squats in front of the Hachiko area.',
     points: 220,
     locationCheck: {
-      label: '渋谷・ハチ公像周辺',
+      label: 'Shibuya Hachiko Statue Area',
       lat: 35.659482,
       lng: 139.70056,
       radiusMeters: 180,
@@ -146,44 +146,44 @@ const FIXED_CHALLENGES: Challenge[] = [
   },
   {
     id: 'red-sign-pose',
-    title: '赤看板ポーズ',
-    description: '赤い看板が見える場所で、3 秒間両手を上げてポーズしてください。',
+    title: 'Red Sign Pose',
+    description: 'At a place where a red sign is visible, raise both hands for 3 seconds.',
     points: 140,
   },
   {
     id: 'convenience-peace',
-    title: 'コンビニピース',
-    description: 'コンビニの袋を持って、カメラに向かってピースしてください。',
+    title: 'Convenience Peace',
+    description: 'Hold a convenience store bag and make a peace sign to the camera.',
     points: 150,
   },
   {
     id: 'drink-redbull',
-    title: 'RedBull チャレンジ',
-    description: 'RedBull を飲んでいるところを見たい',
+    title: 'RedBull Challenge',
+    description: 'Show me you drinking RedBull.',
     points: 160,
   },
   {
     id: 'vending-jump',
-    title: '自販機ジャンプ',
-    description: '自動販売機が映る位置で、その場ジャンプを 2 回してください。',
+    title: 'Vending Machine Jump',
+    description: 'Stand where a vending machine is visible and jump in place twice.',
     points: 170,
   },
   {
     id: 'bench-sit',
-    title: 'ベンチ休憩',
-    description: '公園か屋外ベンチに座って、手を振ってください。',
+    title: 'Bench Break',
+    description: 'Sit on a park or outdoor bench and wave your hand.',
     points: 130,
   },
   {
     id: 'banana-shake',
-    title: 'バナナシェイク',
-    description: 'バナナを振ってください',
+    title: 'Banana Shake',
+    description: 'Shake a banana.',
     points: 140,
   },
   {
     id: 'banzai-pose',
-    title: 'バンザイ',
-    description: '両手を上げてください。バンザイの姿勢をとってください。',
+    title: 'Banzai',
+    description: 'Raise both hands above your head in a banzai pose.',
     points: 130,
   },
 ];
@@ -202,7 +202,7 @@ app.innerHTML = `
 
     <section class="panel quest-panel quest-top">
       <div class="panel-head quest-head">
-        <h3 id="challengeTitle" class="challenge-title">読み込み中...</h3>
+        <h3 id="challengeTitle" class="challenge-title">Loading...</h3>
         <span id="challengePoints" class="points-pill">+0 pt</span>
       </div>
       <p id="challengeDescription" class="challenge-description"></p>
@@ -212,7 +212,7 @@ app.innerHTML = `
         <button id="newChallengeButton" class="btn ghost">Maybe Later...</button>
         <button id="verifyButton" class="btn primary">Share Reality</button>
       </div>
-      <p id="statusText" class="status info">準備完了。カメラ許可後に判定できます。</p>
+      <p id="statusText" class="status info">Ready. Grant camera permissions to start verification.</p>
     </section>
 
     <main class="play-layout">
@@ -225,7 +225,7 @@ app.innerHTML = `
           <video id="cameraPreview" class="preview" playsinline muted></video>
           <div id="sharingOverlay" class="sharing-overlay" aria-live="polite">Sharing Reality…</div>
         </div>
-        <p class="preview-note">判定時に映像と音声を収集し、モデルで達成可否を判定します。顔の前で指で円を作ると Share Reality を開始できます。</p>
+        <p class="preview-note">During verification, video and audio are captured and judged by the model. Make a finger circle in front of your face to start Share Reality.</p>
       </section>
 
       <aside class="panel side-panel">
@@ -241,16 +241,16 @@ app.innerHTML = `
         </div>
 
         <div class="result-card">
-          <h3>直近の判定結果</h3>
-          <p id="resultSummary">未実行</p>
-          <p id="resultReason">理由: -</p>
-          <p id="resultConfidence">信頼度: -</p>
-          <p id="resultLocation">位置判定: -</p>
-          <p id="resultActions">検出アクション: -</p>
+          <h3>Latest Result</h3>
+          <p id="resultSummary">Not executed</p>
+          <p id="resultReason">Reason: -</p>
+          <p id="resultConfidence">Confidence: -</p>
+          <p id="resultLocation">Location Check: -</p>
+          <p id="resultActions">Detected Actions: -</p>
         </div>
 
         <div class="history-wrap">
-          <h3>プレイ履歴</h3>
+          <h3>Play History</h3>
           <ul id="historyList" class="history-list"></ul>
         </div>
       </aside>
@@ -259,20 +259,20 @@ app.innerHTML = `
     <section class="panel debug-screen">
       <div class="debug-head">
         <h2>Debug Screen</h2>
-        <p>従来 UI 相当のデバッグ機能をここに集約しています。</p>
+        <p>Legacy debug features are consolidated here.</p>
       </div>
 
       <div class="debug-grid">
         <div class="panel-lite">
           <h3 class="debug-title">Custom Challenge</h3>
           <div class="custom-challenge-panel">
-            <p class="custom-challenge-label">Debug カスタムお題</p>
-            <textarea id="customChallengeInput" class="custom-challenge-input" placeholder="例: ハチ公前でスクワットを 5 回してください"></textarea>
+            <p class="custom-challenge-label">Debug Custom Challenge</p>
+            <textarea id="customChallengeInput" class="custom-challenge-input" placeholder="Example: Do 5 squats in front of Hachiko"></textarea>
             <div class="custom-challenge-actions">
-              <button id="applyCustomChallengeButton" class="btn ghost" type="button">カスタムお題をセット</button>
-              <button id="clearCustomChallengeButton" class="btn ghost" type="button">カスタム解除</button>
+              <button id="applyCustomChallengeButton" class="btn ghost" type="button">Set Custom Challenge</button>
+              <button id="clearCustomChallengeButton" class="btn ghost" type="button">Clear Custom Challenge</button>
             </div>
-            <button id="resetScoreButton" class="btn danger debug-reset" type="button">スコアをリセット</button>
+            <button id="resetScoreButton" class="btn danger debug-reset" type="button">Reset Score</button>
             <p id="customChallengeMeta" class="custom-challenge-meta"></p>
           </div>
         </div>
@@ -363,12 +363,12 @@ newChallengeButton.addEventListener('click', () => {
   if (customChallengeText) {
     currentChallenge = buildCustomChallenge(customChallengeText);
     renderChallenge(currentChallenge);
-    setStatus('カスタムお題モード中です。解除するとランダム出題に戻ります。', 'info');
+    setStatus('Custom challenge mode is active. Clear it to return to random missions.', 'info');
     return;
   }
   currentChallenge = pickRandomChallenge(currentChallenge.id);
   renderChallenge(currentChallenge);
-  setStatus('新しいお題をセットしました。', 'info');
+  setStatus('A new mission has been set.', 'info');
 });
 
 verifyButton.addEventListener('click', () => {
@@ -385,7 +385,7 @@ resetScoreButton.addEventListener('click', () => {
   persistHistory(history);
   renderScore();
   renderHistory();
-  setStatus('スコアと履歴をリセットしました。', 'info');
+  setStatus('Score and history have been reset.', 'info');
 });
 
 applyCustomChallengeButton.addEventListener('click', () => {
@@ -395,7 +395,7 @@ applyCustomChallengeButton.addEventListener('click', () => {
 
   const normalized = normalizeCustomChallengeText(customChallengeInput.value);
   if (!normalized) {
-    setStatus('カスタムお題を 1〜220 文字で入力してください。', 'error');
+    setStatus('Enter a custom challenge between 1 and 220 characters.', 'error');
     return;
   }
 
@@ -404,7 +404,7 @@ applyCustomChallengeButton.addEventListener('click', () => {
   currentChallenge = buildCustomChallenge(customChallengeText);
   renderChallenge(currentChallenge);
   renderCustomChallengeState();
-  setStatus('デバッグ用カスタムお題をセットしました。', 'info');
+  setStatus('Debug custom challenge has been set.', 'info');
 });
 
 clearCustomChallengeButton.addEventListener('click', () => {
@@ -412,7 +412,7 @@ clearCustomChallengeButton.addEventListener('click', () => {
     return;
   }
   if (!customChallengeText) {
-    setStatus('カスタムお題は未設定です。', 'info');
+    setStatus('No custom challenge is currently set.', 'info');
     return;
   }
 
@@ -421,7 +421,7 @@ clearCustomChallengeButton.addEventListener('click', () => {
   currentChallenge = pickRandomChallenge();
   renderChallenge(currentChallenge);
   renderCustomChallengeState();
-  setStatus('カスタムお題を解除してランダム出題へ戻しました。', 'info');
+  setStatus('Custom challenge cleared. Back to random missions.', 'info');
 });
 
 window.addEventListener('keydown', (event) => {
@@ -456,43 +456,43 @@ async function verifyCurrentChallenge() {
 
   const apiKey = (import.meta.env.VITE_GEMINI_API_KEY ?? '').trim();
   if (!apiKey) {
-    setStatus('`VITE_GEMINI_API_KEY` が未設定です。README の手順で .env を設定してください。', 'error');
+    setStatus('`VITE_GEMINI_API_KEY` is not set. Configure .env using the README steps.', 'error');
     return;
   }
 
   isVerifying = true;
   syncButtonState();
-  resultSummary.textContent = '判定中...';
-  resultReason.textContent = '理由: 判定を準備しています';
-  resultConfidence.textContent = '信頼度: -';
-  resultLocation.textContent = '位置判定: -';
-  resultActions.textContent = '検出アクション: -';
-  setJudgeDebug({ status: 'running', message: '判定中...' });
+  resultSummary.textContent = 'Verifying...';
+  resultReason.textContent = 'Reason: preparing verification';
+  resultConfidence.textContent = 'Confidence: -';
+  resultLocation.textContent = 'Location Check: -';
+  resultActions.textContent = 'Detected Actions: -';
+  setJudgeDebug({ status: 'running', message: 'Verifying...' });
   let verifyPhase = 'init';
 
   try {
     verifyPhase = 'start-media';
-    setStatus('Mission Camera とマイクを準備しています...', 'info');
+    setStatus('Preparing Mission Camera and microphone...', 'info');
     await startMediaCapture();
 
     const locationSnapshot = await getLocationSnapshot(currentChallenge);
 
     verifyPhase = 'capture-evidence';
-    setStatus(`${CAPTURE_SECONDS} 秒間、動作を撮影します。`, 'info');
+    setStatus(`Capturing for ${CAPTURE_SECONDS} seconds.`, 'info');
     let evidence!: CaptureEvidence;
     try {
       isCapturing = true;
       syncButtonState();
       await ensureVideoPlaying(overlayPreview);
       evidence = await captureEvidence(null, preview, activeStream, CAPTURE_SECONDS, (remainingSeconds) => {
-        setStatus(`撮影中... 残り ${remainingSeconds} 秒`, 'info');
+        setStatus(`Capturing... ${remainingSeconds}s remaining`, 'info');
       });
     } finally {
       isCapturing = false;
       syncButtonState();
     }
     setStatus(
-      `収集完了。映像 ${evidence.videoFramesSent} フレーム / 音声 ${evidence.audioChunksSent} チャンクで判定します。`,
+      `Capture complete. Judging with ${evidence.videoFramesSent} video frames / ${evidence.audioChunksSent} audio chunks.`,
       'info',
     );
 
@@ -520,7 +520,7 @@ async function verifyCurrentChallenge() {
     verifyPhase = 'judge-fallback-model';
     isDigesting = true;
     syncButtonState();
-    setStatus('モデル判定を実行します。', 'info');
+    setStatus('Running model judgement...', 'info');
     const fallback = await runFallbackJudgeWithGenerateContent(apiKey, evaluationParts);
     const rawText = fallback.rawText;
     const judgeTransport: 'generate-content-direct' = 'generate-content-direct';
@@ -566,10 +566,13 @@ async function verifyCurrentChallenge() {
     currentChallenge = nextChallengeAfterJudge(currentChallenge.id);
     renderChallenge(currentChallenge);
 
-    setStatus(finalJudgement.success ? `成功! +${finalJudgement.scoreAdded} pt` : '今回は失敗。次のお題へ進めます。', finalJudgement.success ? 'ok' : 'error');
+    setStatus(
+      finalJudgement.success ? `Success! +${finalJudgement.scoreAdded} pt` : 'Failed this round. Moving to the next mission.',
+      finalJudgement.success ? 'ok' : 'error',
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
-    setStatus(`判定失敗: ${message}`, 'error');
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    setStatus(`Verification failed: ${message}`, 'error');
     setJudgeDebug({
       timestamp: new Date().toISOString(),
       status: 'error',
@@ -586,7 +589,7 @@ async function verifyCurrentChallenge() {
 }
 
 function combineJudgement(result: JudgeResult, points: number, locationMessage: string): FinalJudgement {
-  const locationFailed = locationMessage.startsWith('失敗');
+  const locationFailed = locationMessage.startsWith('Failed');
   const success = result.success && !locationFailed;
   const scoreAdded = success ? points : 0;
 
@@ -594,7 +597,7 @@ function combineJudgement(result: JudgeResult, points: number, locationMessage: 
     ...result,
     success,
     scoreAdded,
-    reason: locationFailed ? `${result.reason} / 位置条件を満たしていません` : result.reason,
+    reason: locationFailed ? `${result.reason} / Location requirement not satisfied` : result.reason,
     locationMessage,
   };
 }
@@ -617,7 +620,7 @@ function appendHistory(finalJudgement: FinalJudgement, challenge: Challenge) {
     success: finalJudgement.success,
     scoreAdded: finalJudgement.scoreAdded,
     reason: finalJudgement.reason,
-    timestamp: new Date().toLocaleString('ja-JP'),
+    timestamp: new Date().toLocaleString('en-US'),
   };
 
   history.unshift(record);
@@ -627,13 +630,13 @@ function appendHistory(finalJudgement: FinalJudgement, challenge: Challenge) {
 }
 
 function renderResult(finalJudgement: FinalJudgement) {
-  const scoreText = finalJudgement.success ? `成功 (+${finalJudgement.scoreAdded}pt)` : '失敗 (+0pt)';
+  const scoreText = finalJudgement.success ? `Success (+${finalJudgement.scoreAdded}pt)` : 'Failed (+0pt)';
   resultSummary.textContent = scoreText;
-  resultReason.textContent = `理由: ${finalJudgement.reason}`;
-  resultConfidence.textContent = `信頼度: ${(finalJudgement.confidence * 100).toFixed(0)}%`;
-  resultLocation.textContent = `位置判定: ${finalJudgement.locationMessage}`;
+  resultReason.textContent = `Reason: ${finalJudgement.reason}`;
+  resultConfidence.textContent = `Confidence: ${(finalJudgement.confidence * 100).toFixed(0)}%`;
+  resultLocation.textContent = `Location Check: ${finalJudgement.locationMessage}`;
   const actionsText = finalJudgement.detectedActions.length > 0 ? finalJudgement.detectedActions.join(' / ') : '-';
-  resultActions.textContent = `検出アクション: ${actionsText}`;
+  resultActions.textContent = `Detected Actions: ${actionsText}`;
 }
 
 function renderChallenge(challenge: Challenge) {
@@ -641,8 +644,8 @@ function renderChallenge(challenge: Challenge) {
   challengeDescription.textContent = challenge.description;
   challengePoints.textContent = `+${challenge.points} pt`;
   locationHint.textContent = challenge.locationCheck
-    ? `位置情報オプション: ${challenge.locationCheck.label} (${challenge.locationCheck.radiusMeters}m 以内)`
-    : '位置情報オプション: なし';
+    ? `Location option: ${challenge.locationCheck.label} (within ${challenge.locationCheck.radiusMeters}m)`
+    : 'Location option: none';
 }
 
 function renderScore() {
@@ -655,7 +658,7 @@ function renderHistory() {
   if (history.length === 0) {
     const li = document.createElement('li');
     li.className = 'history-empty';
-    li.textContent = 'まだプレイ履歴がありません。';
+    li.textContent = 'No play history yet.';
     historyList.appendChild(li);
     return;
   }
@@ -664,7 +667,7 @@ function renderHistory() {
     const li = document.createElement('li');
     li.className = item.success ? 'history-item success' : 'history-item fail';
     li.innerHTML = `
-      <p class="history-title">${escapeHtml(item.challengeTitle)} <span>${item.success ? '成功' : '失敗'}</span></p>
+      <p class="history-title">${escapeHtml(item.challengeTitle)} <span>${item.success ? 'Success' : 'Failed'}</span></p>
       <p class="history-meta">${item.timestamp} / ${item.scoreAdded} pt</p>
       <p class="history-reason">${escapeHtml(item.reason)}</p>
     `;
@@ -675,12 +678,12 @@ function renderHistory() {
 function renderCustomChallengeState() {
   if (!customChallengeText) {
     customChallengeInput.value = '';
-    customChallengeMeta.textContent = '現在: ランダムお題モード';
+    customChallengeMeta.textContent = 'Current mode: Random mission mode';
     return;
   }
 
   customChallengeInput.value = customChallengeText;
-  customChallengeMeta.textContent = `現在: カスタムお題モード (+${CUSTOM_CHALLENGE_POINTS} pt)`;
+  customChallengeMeta.textContent = `Current mode: Custom challenge mode (+${CUSTOM_CHALLENGE_POINTS} pt)`;
 }
 
 function syncButtonState() {
@@ -841,7 +844,7 @@ async function createLiveSession(apiKey: string) {
     }
   }
 
-  throw new Error(`Live API 接続に失敗しました。${errors.join(' | ')}`);
+  throw new Error(`Failed to connect to Live API. ${errors.join(' | ')}`);
 }
 
 function resolveLiveModelCandidates(): string[] {
@@ -870,7 +873,7 @@ async function captureEvidence(
   onTick?: (remainingSeconds: number) => void,
 ): Promise<CaptureEvidence> {
   if (!stream) {
-    throw new Error('メディアストリームが取得できていません');
+    throw new Error('Media stream is unavailable');
   }
 
   await waitForVideoReady(video);
@@ -878,7 +881,7 @@ async function captureEvidence(
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) {
-    throw new Error('Canvas context を取得できませんでした');
+    throw new Error('Failed to acquire canvas context');
   }
 
   const sampleInterval = Math.max(1, Math.floor(seconds / MAX_EVALUATION_FRAMES));
@@ -933,7 +936,7 @@ async function captureEvidence(
   const audioCapture = audioStreamer.stop();
 
   if (frameSamples.length === 0) {
-    throw new Error('判定用フレームを取得できませんでした');
+    throw new Error('No frames were captured for judgement');
   }
 
   return {
@@ -954,7 +957,7 @@ async function getLocationSnapshot(challenge: Challenge): Promise<LocationSnapsh
   if (!('geolocation' in navigator)) {
     return {
       status: 'unsupported',
-      message: 'このブラウザは位置情報取得に対応していません。',
+      message: 'This browser does not support geolocation.',
     };
   }
 
@@ -977,24 +980,24 @@ async function getLocationSnapshot(challenge: Challenge): Promise<LocationSnapsh
     if (error instanceof GeolocationPositionError && error.code === error.PERMISSION_DENIED) {
       return {
         status: 'denied',
-        message: '位置情報の取得が許可されませんでした。',
+        message: 'Geolocation permission was denied.',
       };
     }
 
     return {
       status: 'error',
-      message: '位置情報を取得できませんでした。',
+      message: 'Failed to get geolocation.',
     };
   }
 }
 
 function evaluateLocation(challenge: Challenge, snapshot: LocationSnapshot): string {
   if (!challenge.locationCheck) {
-    return 'スキップ (位置条件なし)';
+    return 'Skipped (no location requirement)';
   }
 
   if (snapshot.status !== 'available') {
-    return `スキップ (${snapshot.message ?? snapshot.status})`;
+    return `Skipped (${snapshot.message ?? snapshot.status})`;
   }
 
   const distance = calcDistanceMeters(
@@ -1008,43 +1011,43 @@ function evaluateLocation(challenge: Challenge, snapshot: LocationSnapshot): str
   const roundedAccuracy = Math.round(snapshot.accuracy ?? 0);
 
   if (distance <= challenge.locationCheck.radiusMeters) {
-    return `成功 (${roundedDistance}m / 許容 ${challenge.locationCheck.radiusMeters}m, 精度 ±${roundedAccuracy}m)`;
+    return `Success (${roundedDistance}m / allowed ${challenge.locationCheck.radiusMeters}m, accuracy ±${roundedAccuracy}m)`;
   }
 
-  return `失敗 (${roundedDistance}m / 許容 ${challenge.locationCheck.radiusMeters}m, 精度 ±${roundedAccuracy}m)`;
+  return `Failed (${roundedDistance}m / allowed ${challenge.locationCheck.radiusMeters}m, accuracy ±${roundedAccuracy}m)`;
 }
 
 function buildSystemInstruction() {
   return [
-    'あなたは実世界ミッションの厳密な審査員です。',
-    '送信された映像と音声を根拠にし、未確認なら必ず失敗判定にしてください。',
-    '応答は必ず1行のみ。説明文は禁止。',
-    '形式は次だけを使用: success=<true|false>;confidence=<0-1>;reason=<短文>;detected_actions=<a|b|c>;safety_notes=<短文>',
-    'confidence は 0 から 1 の実数。',
+    'You are a strict real-world mission judge.',
+    'Use the provided video and audio as evidence, and mark failure when unconfirmed.',
+    'Return exactly one line only. No explanations.',
+    'Use only this format: success=<true|false>;confidence=<0-1>;reason=<short>;detected_actions=<a|b|c>;safety_notes=<short>',
+    'confidence must be a real number between 0 and 1.',
   ].join(' ');
 }
 
 function buildEvaluationPrompt(challenge: Challenge, location: LocationSnapshot, hasAudioClip: boolean) {
   const locationDetails = challenge.locationCheck
-    ? `\n位置条件: ${challenge.locationCheck.label} から半径 ${challenge.locationCheck.radiusMeters}m 以内。`
-    : '\n位置条件: なし。';
+    ? `\nLocation requirement: within ${challenge.locationCheck.radiusMeters}m of ${challenge.locationCheck.label}.`
+    : '\nLocation requirement: none.';
 
   const locationMeasurement =
     location.status === 'available'
-      ? `\n取得したGPS: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}m`
-      : `\nGPS情報: ${location.message ?? location.status}`;
+      ? `\nCaptured GPS: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}m`
+      : `\nGPS status: ${location.message ?? location.status}`;
 
   return [
-    '以下のチャレンジが達成されたか判定してください。',
-    `チャレンジ: ${challenge.description}`,
+    'Judge whether the following challenge was completed.',
+    `Challenge: ${challenge.description}`,
     locationDetails,
     locationMeasurement,
     hasAudioClip
-      ? '映像フレームと音声（realtime + audio/wav クリップ）を送信済みです。歌う・話す等の音声系条件は音声を根拠に判定してください。'
-      : '映像フレームと音声ストリームを送信済みです。音声クリップは未添付です。歌う・話す等の音声系条件は受信できた音声だけを根拠に判定してください。',
-    '画面内で確認できた具体的な行動を detected_actions に 1〜4 件記載してください。',
-    '最終回答は次の1行形式だけで返してください。',
-    'success=<true|false>;confidence=<0-1>;reason=<短文>;detected_actions=<a|b|c>;safety_notes=<短文>',
+      ? 'Video frames and audio (realtime + audio/wav clip) are attached. For speaking/singing tasks, use audio as evidence.'
+      : 'Video frames and realtime audio are attached. Audio clip is not attached. For speaking/singing tasks, use only received audio as evidence.',
+    'List 1-4 concrete actions detected on screen in detected_actions.',
+    'Return only one line using this format.',
+    'success=<true|false>;confidence=<0-1>;reason=<short>;detected_actions=<a|b|c>;safety_notes=<short>',
   ].join('\n');
 }
 
@@ -1132,7 +1135,7 @@ function parseJsonJudgeResult(rawText: string): JudgeResult | null {
     return {
       success: normalizeBoolean(parsed.success),
       confidence: normalizeConfidence(parsed.confidence),
-      reason: typeof parsed.reason === 'string' ? parsed.reason : '理由が返されませんでした。',
+      reason: typeof parsed.reason === 'string' ? parsed.reason : 'No reason was returned.',
       detectedActions,
       safetyNotes: typeof safetyNotesRaw === 'string' ? safetyNotesRaw : '',
     };
@@ -1145,7 +1148,7 @@ function buildParseFailureResult(rawText: string): JudgeResult {
   return {
     success: false,
     confidence: 0,
-    reason: `JSON 解析失敗: ${rawText.slice(0, 240)}`,
+    reason: `JSON parse failed: ${rawText.slice(0, 240)}`,
     detectedActions: [],
     safetyNotes: '',
   };
@@ -1184,7 +1187,7 @@ async function normalizeJudgeResultWithModel(apiKey: string, challenge: Challeng
           },
         }),
         JUDGE_NORMALIZER_TIMEOUT_MS,
-        `判定正規化モデル (${modelName}) がタイムアウトしました`,
+        `Judge normalizer model (${modelName}) timed out`,
       );
 
       const normalizedText = (response.text ?? '').trim();
@@ -1230,11 +1233,11 @@ function resolveJudgeNormalizerModelCandidates(): string[] {
 
 function buildJudgeNormalizerPrompt(challenge: Challenge, rawText: string): string {
   return [
-    'あなたは審査テキスト正規化器です。入力の審査文だけを根拠に、指定JSONを返してください。',
-    '新しい判定を作らず、審査文に含まれる結論を抽出してください。',
-    '審査文が矛盾・不明瞭な場合は success=false、confidence は 0.4 以下にしてください。',
-    'reason は 120 文字以内で、要点だけを日本語で記載してください。',
-    'detectedActions は 0〜4 件の短い語句配列にしてください。',
+    'You are a judgement text normalizer. Return the requested JSON based only on the judgement text.',
+    'Do not create a new judgement. Extract the conclusion contained in the text.',
+    'If the text is contradictory or unclear, set success=false and confidence to 0.4 or below.',
+    'Keep reason within 120 characters and concise.',
+    'detectedActions should be an array of 0-4 short phrases.',
     `challenge: ${challenge.description}`,
     `judge_text: ${rawText}`,
   ].join('\n');
@@ -1276,7 +1279,7 @@ async function runFallbackJudgeWithGenerateContent(
           },
         }),
         20000,
-        `フォールバック判定モデル (${modelName}) がタイムアウトしました`,
+        `Fallback judge model (${modelName}) timed out`,
       );
 
       const rawText = (response.text ?? '').trim();
@@ -1297,7 +1300,7 @@ async function runFallbackJudgeWithGenerateContent(
     }
   }
 
-  throw new Error(`フォールバック判定に失敗しました。${errors.join(' | ')}`);
+  throw new Error(`Fallback judgement failed. ${errors.join(' | ')}`);
 }
 
 function resolveJudgeFallbackModelCandidates(): string[] {
@@ -1322,15 +1325,14 @@ function parseNarrativeJudgeResult(rawText: string): JudgeResult | null {
     /success\s*(?:is|=|:|to)?\s*false/i,
     /success\s*:\s*false/i,
     /\bsuccess\s+false\b/i,
-    /成功\s*(?:は|が)?\s*false/i,
-    /成功\s*ではない/i,
-    /失敗/i,
+    /\bnot successful\b/i,
+    /\bfailed\b/i,
   ];
   const explicitTruePatterns = [
     /success\s*(?:is|=|:|to)?\s*true/i,
     /success\s*:\s*true/i,
     /\bsuccess\s+true\b/i,
-    /成功\s*(?:です|した)/i,
+    /\bsuccessful\b/i,
   ];
 
   const hasExplicitFalse = explicitFalsePatterns.some((pattern) => pattern.test(normalized));
@@ -1363,8 +1365,6 @@ function parseNarrativeJudgeResult(rawText: string): JudgeResult | null {
     /criteria (?:are|is|were|was) met/g,
     /requirement(?:s)? (?:are|is|were|was) met/g,
     /confirmed utterance/g,
-    /達成/g,
-    /条件を満た/g,
   ];
   const negativePatterns = [
     /\bfail(?:ed|ure)?\b/g,
@@ -1379,10 +1379,6 @@ function parseNarrativeJudgeResult(rawText: string): JudgeResult | null {
     /lack of audio/g,
     /without audio/g,
     /audio (?:stream )?(?:is )?(?:unavailable|missing|not available|could not be confirmed)/g,
-    /音声ストリームが確認できません/g,
-    /確認できません/g,
-    /未達成/g,
-    /失敗/g,
   ];
 
   const positiveHits = countMatches(lower, positivePatterns);
@@ -1426,7 +1422,7 @@ function parseKeyValueJudgeResult(rawText: string): JudgeResult | null {
 
   const successRaw = (map.get('success') ?? '').toLowerCase();
   const confidenceRaw = map.get('confidence') ?? '';
-  const reason = map.get('reason') ?? '理由が返されませんでした。';
+  const reason = map.get('reason') ?? 'No reason was returned.';
   const safetyNotes = map.get('safety_notes') ?? '';
   const actionsRaw = map.get('detected_actions') ?? '';
 
@@ -1489,7 +1485,7 @@ function countMatches(text: string, patterns: RegExp[]): number {
 }
 
 function summarizeNarrativeReason(text: string): string {
-  const firstSentence = text.split(/(?<=[.!?。！？])\s+/)[0] ?? text;
+  const firstSentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
   return firstSentence.slice(0, 220);
 }
 
@@ -1513,7 +1509,7 @@ function pickRandomChallenge(excludedId?: string) {
 function buildCustomChallenge(text: string): Challenge {
   return {
     id: 'custom-debug-challenge',
-    title: 'DEBUG カスタムお題',
+    title: 'DEBUG Custom Challenge',
     description: text,
     points: CUSTOM_CHALLENGE_POINTS,
   };
@@ -1876,7 +1872,7 @@ function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
 
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
-      reject(new Error('カメラ映像の初期化がタイムアウトしました'));
+      reject(new Error('Camera initialization timed out'));
     }, 5000);
 
     const onLoaded = () => {
@@ -1969,7 +1965,7 @@ async function ensureGestureTriggerWatcher() {
       gestureRetryAfterMs = Date.now() + 30000;
       console.warn('gesture-trigger-init-failed', error);
       setStatus(
-        `指ジェスチャー検出を有効化できませんでした。ボタンまたは Space で開始してください。(${gestureInitFailedMessage})`,
+        `Failed to enable finger-gesture detection. Use the button or Space to start. (${gestureInitFailedMessage})`,
         'error',
       );
     } finally {
@@ -2084,7 +2080,7 @@ function runGestureFrame(timestampMs: number) {
 
   gestureLastTriggeredAtMs = nowEpoch;
   gestureHoldStartedAtMs = null;
-  setStatus('指で円ジェスチャーを検出。Share Reality を開始します。', 'info');
+  setStatus('Finger circle gesture detected. Starting Share Reality.', 'info');
   void verifyCurrentChallenge();
 }
 
@@ -2185,7 +2181,7 @@ async function warmupMissionCamera() {
     await startMediaCapture();
   } catch (error) {
     setStatus(
-      `Mission Camera を開始できませんでした。権限を許可して再試行してください。(${stringifyError(error)})`,
+      `Failed to start Mission Camera. Grant permissions and retry. (${stringifyError(error)})`,
       'error',
     );
   }
