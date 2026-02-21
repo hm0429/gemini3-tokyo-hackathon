@@ -106,6 +106,7 @@ const CHALLENGE_SOURCE_STORAGE_KEY = 'reality-quest-challenge-source-v1';
 const CAPTURE_SECONDS = resolveCaptureSeconds();
 const CUSTOM_CHALLENGE_POINTS = 150;
 const MAX_EVALUATION_FRAMES = 12;
+const CURIOSITY_LEVEL_POINTS = 1000;
 const JUDGE_NORMALIZER_TIMEOUT_MS = 8000;
 const CHALLENGE_GENERATOR_TIMEOUT_MS = 10000;
 const GESTURE_TRIGGER_ENABLED = resolveGestureTriggerEnabled();
@@ -160,9 +161,17 @@ app.innerHTML = `
 
       <aside class="panel side-panel">
         <div class="metrics">
-          <div class="metric">
-            <p class="metric-label">TOTAL SCORE</p>
-            <p id="scoreValue" class="metric-value">0</p>
+          <div class="curiosity-meter">
+            <p class="metric-label">AI CURIOSITY</p>
+            <div class="curiosity-head">
+              <p id="curiosityLevel" class="curiosity-level">LEVEL 1</p>
+              <p id="curiosityPercent" class="curiosity-percent">0%</p>
+            </div>
+            <div class="curiosity-track" aria-hidden="true">
+              <div id="curiosityFill" class="curiosity-fill"></div>
+            </div>
+            <p id="curiosityHint" class="curiosity-hint">1000 pt to LEVEL 2</p>
+            <p class="curiosity-total">TOTAL <span id="scoreValue">0</span> pt</p>
           </div>
           <div class="metric">
             <p class="metric-label">STREAK</p>
@@ -245,8 +254,12 @@ app.innerHTML = `
   </div>
 `;
 
-const scoreValue = queryEl<HTMLParagraphElement>('#scoreValue');
+const scoreValue = queryEl<HTMLSpanElement>('#scoreValue');
 const streakValue = queryEl<HTMLParagraphElement>('#streakValue');
+const curiosityLevel = queryEl<HTMLParagraphElement>('#curiosityLevel');
+const curiosityPercent = queryEl<HTMLParagraphElement>('#curiosityPercent');
+const curiosityFill = queryEl<HTMLDivElement>('#curiosityFill');
+const curiosityHint = queryEl<HTMLParagraphElement>('#curiosityHint');
 const challengeTitle = queryEl<HTMLHeadingElement>('#challengeTitle');
 const challengeDescription = queryEl<HTMLParagraphElement>('#challengeDescription');
 const challengePoints = queryEl<HTMLSpanElement>('#challengePoints');
@@ -602,7 +615,18 @@ function renderChallenge(challenge: Challenge) {
 }
 
 function renderScore() {
-  scoreValue.textContent = String(appState.score);
+  const totalScore = Math.max(0, appState.score);
+  const level = Math.floor(totalScore / CURIOSITY_LEVEL_POINTS) + 1;
+  const levelProgress = totalScore % CURIOSITY_LEVEL_POINTS;
+  const progressRatio = levelProgress / CURIOSITY_LEVEL_POINTS;
+  const progressPercent = Math.round(progressRatio * 100);
+  const pointsToNext = CURIOSITY_LEVEL_POINTS - levelProgress;
+
+  scoreValue.textContent = String(totalScore);
+  curiosityLevel.textContent = `LEVEL ${level}`;
+  curiosityPercent.textContent = `${progressPercent}%`;
+  curiosityFill.style.width = `${progressPercent}%`;
+  curiosityHint.textContent = `${pointsToNext} pt to LEVEL ${level + 1}`;
   streakValue.textContent = String(appState.streak);
 }
 

@@ -517,6 +517,78 @@ body::before {
   gap: 10px;
 }
 
+.curiosity-meter {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(11, 137, 130, 0.28);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background:
+    radial-gradient(circle at 88% -22%, rgba(11, 137, 130, 0.22), rgba(11, 137, 130, 0)),
+    linear-gradient(152deg, rgba(241, 253, 250, 0.98), rgba(234, 248, 255, 0.92));
+}
+
+.curiosity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.curiosity-level {
+  margin: 7px 0 0;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.curiosity-percent {
+  margin: 7px 0 0;
+  color: #0f6f88;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 0.96rem;
+  letter-spacing: 0.06em;
+}
+
+.curiosity-track {
+  margin-top: 10px;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(11, 137, 130, 0.3);
+  background: linear-gradient(180deg, rgba(18, 43, 60, 0.16), rgba(18, 43, 60, 0.04));
+}
+
+.curiosity-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, rgba(12, 172, 133, 0.95), rgba(16, 136, 207, 0.92)),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.22) 0px, rgba(255, 255, 255, 0.22) 8px, transparent 8px, transparent 16px);
+  box-shadow: 0 0 14px rgba(20, 146, 174, 0.42);
+  transition: width 340ms cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.curiosity-hint {
+  margin: 7px 0 0;
+  color: #4e6577;
+  font-size: 0.8rem;
+}
+
+.curiosity-total {
+  margin: 6px 0 0;
+  color: #2a4658;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 0.84rem;
+  letter-spacing: 0.07em;
+}
+
+.curiosity-total span {
+  font-size: 1.06rem;
+  font-weight: 700;
+}
+
 .metric {
   position: relative;
   overflow: hidden;
