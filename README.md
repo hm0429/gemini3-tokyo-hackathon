@@ -30,6 +30,12 @@ VITE_GEMINI_API_KEY=YOUR_API_KEY
 # Optional
 # VITE_CAPTURE_SECONDS=10
 # Optional
+# VITE_GESTURE_TRIGGER_ENABLED=true
+# Optional
+# VITE_GESTURE_WASM_ROOT=https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm
+# Optional
+# VITE_GESTURE_MODEL_ASSET_PATH=https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+# Optional
 # VITE_GEMINI_JUDGE_NORMALIZER_MODEL=gemini-2.5-flash
 # Optional
 # VITE_GEMINI_JUDGE_FALLBACK_MODEL=gemini-2.5-flash
@@ -37,6 +43,8 @@ VITE_GEMINI_API_KEY=YOUR_API_KEY
 
 既存の `.env` が `GEMINI_API_KEY` になっている場合は、`VITE_` プレフィックス付きの `VITE_GEMINI_API_KEY` に変更してください。
 判定フレーム秒数は `.env` の `VITE_CAPTURE_SECONDS`（1〜60）で変更できます。未指定時は 10 秒です。
+顔の前で指で円を作るジェスチャーで `Share Reality` を開始できます。無効化する場合は `VITE_GESTURE_TRIGGER_ENABLED=false` を設定してください。
+ジェスチャー検出モデルの取得先を固定したい場合は `VITE_GESTURE_WASM_ROOT` / `VITE_GESTURE_MODEL_ASSET_PATH` を設定してください。
 判定正規化モデルを固定したい場合は `VITE_GEMINI_JUDGE_NORMALIZER_MODEL` を指定してください（未指定時は `gemini-2.5-flash` → `gemini-2.0-flash` の順に試行）。
 判定モデルを固定したい場合は `VITE_GEMINI_JUDGE_FALLBACK_MODEL` を指定してください（未指定時は `gemini-2.5-flash` → `gemini-2.0-flash`）。
 
@@ -52,7 +60,7 @@ npm run dev
 
 1. 「次のお題」でランダムお題を選択
 2. 実世界でお題を実行
-3. 「実行を判定する」を押す
+3. 「Share Reality」を押す、または顔の前で指で円を作る
 4. 10 秒間のカメラ映像と音声を収集し、`models.generateContent` で判定する
 5. 成功時にポイント加算
 6. Debug カスタムお題を使う場合は、画面の入力欄にお題文を入れて「カスタムお題をセット」を押す

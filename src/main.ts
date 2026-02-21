@@ -80,6 +80,34 @@ type AudioRealtimeStreamer = {
   stop: () => AudioCaptureResult;
 };
 
+type LandmarkPoint = {
+  x: number;
+  y: number;
+  z?: number;
+};
+
+type HandLandmarkerLike = {
+  detectForVideo: (
+    video: HTMLVideoElement,
+    timestampMs: number,
+  ) => {
+    landmarks?: LandmarkPoint[][];
+  };
+  close?: () => void;
+};
+
+type VisionTasksModule = {
+  FilesetResolver: {
+    forVisionTasks: (wasmRoot: string) => Promise<unknown>;
+  };
+  HandLandmarker: {
+    createFromOptions: (
+      filesetResolver: unknown,
+      options: Record<string, unknown>,
+    ) => Promise<HandLandmarkerLike>;
+  };
+};
+
 const STORAGE_KEY = 'reality-quest-state-v1';
 const HISTORY_STORAGE_KEY = 'reality-quest-history-v1';
 const CUSTOM_CHALLENGE_STORAGE_KEY = 'reality-quest-custom-challenge-v1';
@@ -87,6 +115,15 @@ const CAPTURE_SECONDS = resolveCaptureSeconds();
 const CUSTOM_CHALLENGE_POINTS = 150;
 const MAX_EVALUATION_FRAMES = 12;
 const JUDGE_NORMALIZER_TIMEOUT_MS = 8000;
+const GESTURE_TRIGGER_ENABLED = resolveGestureTriggerEnabled();
+const GESTURE_WASM_ROOT = resolveGestureWasmRoot();
+const GESTURE_MODEL_ASSET_PATH = resolveGestureModelAssetPath();
+const GESTURE_HOLD_MS = 700;
+const GESTURE_COOLDOWN_MS = 5000;
+const GESTURE_INFERENCE_INTERVAL_MS = 140;
+const GESTURE_PINCH_TO_PALM_RATIO = 0.43;
+const GESTURE_CENTER_RADIUS = 0.29;
+const GESTURE_EXTENSION_RATIO = 1.08;
 
 const FIXED_CHALLENGES: Challenge[] = [
   {
@@ -188,7 +225,7 @@ app.innerHTML = `
           <video id="cameraPreview" class="preview" playsinline muted></video>
           <div id="sharingOverlay" class="sharing-overlay" aria-live="polite">Sharing Reality…</div>
         </div>
-        <p class="preview-note">判定時に映像と音声を収集し、モデルで達成可否を判定します。</p>
+        <p class="preview-note">判定時に映像と音声を収集し、モデルで達成可否を判定します。顔の前で指で円を作ると Share Reality を開始できます。</p>
       </section>
 
       <aside class="panel side-panel">
@@ -293,6 +330,14 @@ let isVerifying = false;
 let isCapturing = false;
 let activeStream: MediaStream | null = null;
 let activeSession: Session | null = null;
+let handLandmarker: HandLandmarkerLike | null = null;
+let gestureInitPromise: Promise<void> | null = null;
+let gestureLoopHandle: number | null = null;
+let gestureHoldStartedAtMs: number | null = null;
+let gestureLastTriggeredAtMs = 0;
+let gestureLastInferenceAtMs = 0;
+let gestureInitFailedMessage: string | null = null;
+let gestureRetryAfterMs = 0;
 
 newChallengeButton.addEventListener('click', () => {
   if (isVerifying) {
@@ -375,6 +420,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('beforeunload', () => {
+  stopGestureWatcher();
   stopMedia();
   closeSession();
 });
@@ -1724,6 +1770,7 @@ async function startMediaCapture() {
   if (activeStream && hasLiveTracks(activeStream)) {
     attachStreamToPreviews(activeStream);
     await ensureVideoPlaying(preview);
+    void ensureGestureTriggerWatcher();
     return;
   }
 
@@ -1744,6 +1791,7 @@ async function startMediaCapture() {
   activeStream = stream;
   attachStreamToPreviews(stream);
   await ensureVideoPlaying(preview);
+  void ensureGestureTriggerWatcher();
 }
 
 function stopMedia() {
@@ -1846,6 +1894,237 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+async function ensureGestureTriggerWatcher() {
+  if (!GESTURE_TRIGGER_ENABLED || handLandmarker || gestureInitPromise) {
+    return;
+  }
+
+  if (Date.now() < gestureRetryAfterMs) {
+    return;
+  }
+
+  gestureInitPromise = (async () => {
+    try {
+      const vision = (await import('@mediapipe/tasks-vision')) as unknown as VisionTasksModule;
+      const filesetResolver = await vision.FilesetResolver.forVisionTasks(GESTURE_WASM_ROOT);
+      handLandmarker = await createHandLandmarker(vision, filesetResolver);
+      startGestureLoop();
+    } catch (error) {
+      gestureInitFailedMessage = stringifyError(error);
+      gestureRetryAfterMs = Date.now() + 30000;
+      console.warn('gesture-trigger-init-failed', error);
+      setStatus(
+        `指ジェスチャー検出を有効化できませんでした。ボタンまたは Space で開始してください。(${gestureInitFailedMessage})`,
+        'error',
+      );
+    } finally {
+      gestureInitPromise = null;
+    }
+  })();
+
+  await gestureInitPromise;
+}
+
+async function createHandLandmarker(vision: VisionTasksModule, filesetResolver: unknown): Promise<HandLandmarkerLike> {
+  const baseOptions = {
+    modelAssetPath: GESTURE_MODEL_ASSET_PATH,
+  };
+  const delegates: Array<'GPU' | 'CPU'> = ['GPU', 'CPU'];
+  let lastError: unknown = null;
+
+  for (const delegate of delegates) {
+    try {
+      return await vision.HandLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: {
+          ...baseOptions,
+          delegate,
+        },
+        runningMode: 'VIDEO',
+        numHands: 1,
+        minHandDetectionConfidence: 0.65,
+        minHandPresenceConfidence: 0.6,
+        minTrackingConfidence: 0.55,
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error('hand landmarker initialization failed');
+}
+
+function startGestureLoop() {
+  if (!handLandmarker || gestureLoopHandle !== null) {
+    return;
+  }
+
+  const tick = (timestampMs: number) => {
+    gestureLoopHandle = window.requestAnimationFrame(tick);
+    runGestureFrame(timestampMs);
+  };
+
+  gestureLoopHandle = window.requestAnimationFrame(tick);
+}
+
+function stopGestureWatcher() {
+  if (gestureLoopHandle !== null) {
+    window.cancelAnimationFrame(gestureLoopHandle);
+    gestureLoopHandle = null;
+  }
+  gestureHoldStartedAtMs = null;
+
+  if (handLandmarker?.close) {
+    try {
+      handLandmarker.close();
+    } catch {
+      // ignore close error
+    }
+  }
+  handLandmarker = null;
+}
+
+function runGestureFrame(timestampMs: number) {
+  if (!handLandmarker || isVerifying || isCapturing || !activeStream || !hasLiveTracks(activeStream)) {
+    gestureHoldStartedAtMs = null;
+    return;
+  }
+
+  if (preview.videoWidth < 120 || preview.videoHeight < 120) {
+    return;
+  }
+
+  if (timestampMs - gestureLastInferenceAtMs < GESTURE_INFERENCE_INTERVAL_MS) {
+    return;
+  }
+  gestureLastInferenceAtMs = timestampMs;
+
+  let landmarks: LandmarkPoint[][] = [];
+  try {
+    const result = handLandmarker.detectForVideo(preview, timestampMs);
+    landmarks = result.landmarks ?? [];
+  } catch {
+    gestureHoldStartedAtMs = null;
+    return;
+  }
+
+  const circleDetected = landmarks.some((hand) => isCircleGestureNearCenter(hand));
+  if (!circleDetected) {
+    gestureHoldStartedAtMs = null;
+    return;
+  }
+
+  if (gestureHoldStartedAtMs === null) {
+    gestureHoldStartedAtMs = timestampMs;
+    return;
+  }
+
+  if (timestampMs - gestureHoldStartedAtMs < GESTURE_HOLD_MS) {
+    return;
+  }
+
+  const nowEpoch = Date.now();
+  if (nowEpoch - gestureLastTriggeredAtMs < GESTURE_COOLDOWN_MS) {
+    return;
+  }
+
+  gestureLastTriggeredAtMs = nowEpoch;
+  gestureHoldStartedAtMs = null;
+  setStatus('指で円ジェスチャーを検出。Share Reality を開始します。', 'info');
+  void verifyCurrentChallenge();
+}
+
+function isCircleGestureNearCenter(landmarks: LandmarkPoint[]): boolean {
+  if (landmarks.length < 21) {
+    return false;
+  }
+
+  const wrist = landmarks[0];
+  const thumbTip = landmarks[4];
+  const indexTip = landmarks[8];
+  const indexMcp = landmarks[5];
+  const middlePip = landmarks[10];
+  const middleTip = landmarks[12];
+  const middleMcp = landmarks[9];
+  const ringPip = landmarks[14];
+  const ringTip = landmarks[16];
+  const ringMcp = landmarks[13];
+  const pinkyPip = landmarks[18];
+  const pinkyTip = landmarks[20];
+  const pinkyMcp = landmarks[17];
+
+  if (
+    !wrist ||
+    !thumbTip ||
+    !indexTip ||
+    !indexMcp ||
+    !middlePip ||
+    !middleTip ||
+    !middleMcp ||
+    !ringPip ||
+    !ringTip ||
+    !ringMcp ||
+    !pinkyPip ||
+    !pinkyTip ||
+    !pinkyMcp
+  ) {
+    return false;
+  }
+
+  const palmSize = distance2d(wrist, middleMcp);
+  if (palmSize < 0.04) {
+    return false;
+  }
+
+  const pinchDistance = distance2d(thumbTip, indexTip);
+  const pinchValid = pinchDistance <= palmSize * GESTURE_PINCH_TO_PALM_RATIO;
+  if (!pinchValid) {
+    return false;
+  }
+
+  const middleExtended = isFingerExtended(middleTip, middlePip, wrist);
+  const ringExtended = isFingerExtended(ringTip, ringPip, wrist);
+  const pinkyExtended = isFingerExtended(pinkyTip, pinkyPip, wrist);
+  if (!middleExtended || !ringExtended || !pinkyExtended) {
+    return false;
+  }
+
+  const handCenter = averagePoint([wrist, indexMcp, middleMcp, ringMcp, pinkyMcp]);
+  const loopCenter = averagePoint([thumbTip, indexTip]);
+  const screenCenter = { x: 0.5, y: 0.5 };
+
+  if (distance2d(handCenter, screenCenter) > GESTURE_CENTER_RADIUS) {
+    return false;
+  }
+
+  return distance2d(loopCenter, screenCenter) <= GESTURE_CENTER_RADIUS * 0.9;
+}
+
+function isFingerExtended(tip: LandmarkPoint, pip: LandmarkPoint, wrist: LandmarkPoint): boolean {
+  const tipDistance = distance2d(tip, wrist);
+  const pipDistance = distance2d(pip, wrist);
+  return tipDistance > pipDistance * GESTURE_EXTENSION_RATIO;
+}
+
+function averagePoint(points: LandmarkPoint[]): LandmarkPoint {
+  const sum = points.reduce(
+    (acc, point) => {
+      acc.x += point.x;
+      acc.y += point.y;
+      return acc;
+    },
+    { x: 0, y: 0 },
+  );
+
+  return {
+    x: sum.x / points.length,
+    y: sum.y / points.length,
+  };
+}
+
+function distance2d(a: LandmarkPoint, b: LandmarkPoint): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
 async function warmupMissionCamera() {
   try {
     await startMediaCapture();
@@ -1914,4 +2193,25 @@ function resolveCaptureSeconds(): number {
   }
 
   return rounded;
+}
+
+function resolveGestureTriggerEnabled(): boolean {
+  const raw = String(import.meta.env.VITE_GESTURE_TRIGGER_ENABLED ?? 'true').trim().toLowerCase();
+  return raw !== '0' && raw !== 'false' && raw !== 'off' && raw !== 'no';
+}
+
+function resolveGestureWasmRoot(): string {
+  const configured = String(import.meta.env.VITE_GESTURE_WASM_ROOT ?? '').trim();
+  if (configured) {
+    return configured;
+  }
+  return 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm';
+}
+
+function resolveGestureModelAssetPath(): string {
+  const configured = String(import.meta.env.VITE_GESTURE_MODEL_ASSET_PATH ?? '').trim();
+  if (configured) {
+    return configured;
+  }
+  return 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 }
