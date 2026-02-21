@@ -297,6 +297,13 @@ app.innerHTML = `
     <div id="digestOverlay" class="digest-overlay" aria-hidden="true">
       <p class="digest-overlay-text">Digesting Reality…</p>
     </div>
+
+    <div id="outcomeOverlay" class="outcome-overlay" aria-live="polite" aria-hidden="true">
+      <div class="outcome-content">
+        <p id="outcomeTitle" class="outcome-title">SUCCESS</p>
+        <p id="outcomeScoreDelta" class="outcome-score-delta">+0 pt</p>
+      </div>
+    </div>
   </div>
 `;
 
@@ -311,6 +318,9 @@ const preview = queryEl<HTMLVideoElement>('#cameraPreview');
 const overlayPreview = queryEl<HTMLVideoElement>('#cameraPreviewOverlay');
 const captureOverlay = queryEl<HTMLDivElement>('#captureOverlay');
 const digestOverlay = queryEl<HTMLDivElement>('#digestOverlay');
+const outcomeOverlay = queryEl<HTMLDivElement>('#outcomeOverlay');
+const outcomeTitle = queryEl<HTMLParagraphElement>('#outcomeTitle');
+const outcomeScoreDelta = queryEl<HTMLParagraphElement>('#outcomeScoreDelta');
 const sharingOverlay = queryEl<HTMLDivElement>('#sharingOverlay');
 const resultSummary = queryEl<HTMLParagraphElement>('#resultSummary');
 const resultReason = queryEl<HTMLParagraphElement>('#resultReason');
@@ -344,6 +354,7 @@ let gestureLastTriggeredAtMs = 0;
 let gestureLastInferenceAtMs = 0;
 let gestureInitFailedMessage: string | null = null;
 let gestureRetryAfterMs = 0;
+let outcomeHideTimeoutId: number | null = null;
 
 newChallengeButton.addEventListener('click', () => {
   if (isVerifying) {
@@ -426,6 +437,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('beforeunload', () => {
+  clearOutcomeOverlayTimer();
   stopGestureWatcher();
   stopMedia();
   closeSession();
@@ -544,9 +556,12 @@ async function verifyCurrentChallenge() {
       finalJudgement,
       locationSnapshot,
     });
+    isDigesting = false;
+    syncButtonState();
 
     applyScore(finalJudgement);
     renderResult(finalJudgement);
+    showOutcomeOverlay(finalJudgement);
     appendHistory(finalJudgement, currentChallenge);
     currentChallenge = nextChallengeAfterJudge(currentChallenge.id);
     renderChallenge(currentChallenge);
@@ -694,6 +709,32 @@ function setStatus(message: string, kind: 'info' | 'ok' | 'error') {
 
 function setJudgeDebug(payload: unknown) {
   judgeJson.textContent = JSON.stringify(payload, null, 2);
+}
+
+function showOutcomeOverlay(finalJudgement: FinalJudgement) {
+  clearOutcomeOverlayTimer();
+
+  const success = finalJudgement.success;
+  outcomeTitle.textContent = success ? 'SUCCESS' : 'FAILED';
+  outcomeScoreDelta.textContent = success ? `+${finalJudgement.scoreAdded} pt` : '+0 pt';
+
+  outcomeOverlay.classList.remove('success', 'fail', 'active');
+  void outcomeOverlay.offsetWidth;
+  outcomeOverlay.classList.add(success ? 'success' : 'fail', 'active');
+  outcomeOverlay.setAttribute('aria-hidden', 'false');
+
+  outcomeHideTimeoutId = window.setTimeout(() => {
+    outcomeOverlay.classList.remove('active');
+    outcomeOverlay.setAttribute('aria-hidden', 'true');
+    outcomeHideTimeoutId = null;
+  }, 1800);
+}
+
+function clearOutcomeOverlayTimer() {
+  if (outcomeHideTimeoutId !== null) {
+    window.clearTimeout(outcomeHideTimeoutId);
+    outcomeHideTimeoutId = null;
+  }
 }
 
 async function createLiveSession(apiKey: string) {
