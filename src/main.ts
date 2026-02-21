@@ -138,6 +138,12 @@ const FIXED_CHALLENGES: Challenge[] = [
     points: 130,
   },
   {
+    id: 'banana-shake',
+    title: 'バナナシェイク',
+    description: 'バナナを振ってください',
+    points: 140,
+  },
+  {
     id: 'banzai-pose',
     title: 'バンザイ',
     description: '両手を上げてください。バンザイの姿勢をとってください。',
@@ -166,8 +172,8 @@ app.innerHTML = `
       <p id="locationHint" class="location-hint"></p>
 
       <div class="actions">
-        <button id="newChallengeButton" class="btn ghost">次のお題</button>
-        <button id="verifyButton" class="btn primary">実行を判定する</button>
+        <button id="newChallengeButton" class="btn ghost">Maybe Later...</button>
+        <button id="verifyButton" class="btn primary">Share Reality</button>
       </div>
       <p id="statusText" class="status info">準備完了。カメラ許可後に判定できます。</p>
     </section>
@@ -178,7 +184,10 @@ app.innerHTML = `
           <h2>Mission Camera</h2>
           <p class="stage-capture">${CAPTURE_SECONDS}s capture</p>
         </div>
-        <video id="cameraPreview" class="preview" playsinline muted></video>
+        <div class="preview-wrap">
+          <video id="cameraPreview" class="preview" playsinline muted></video>
+          <div id="sharingOverlay" class="sharing-overlay" aria-live="polite">Experiencing your world…</div>
+        </div>
         <p class="preview-note">判定時に映像と音声を収集し、モデルで達成可否を判定します。</p>
       </section>
 
@@ -249,6 +258,7 @@ const challengePoints = queryEl<HTMLSpanElement>('#challengePoints');
 const locationHint = queryEl<HTMLParagraphElement>('#locationHint');
 const statusText = queryEl<HTMLParagraphElement>('#statusText');
 const preview = queryEl<HTMLVideoElement>('#cameraPreview');
+const sharingOverlay = queryEl<HTMLDivElement>('#sharingOverlay');
 const resultSummary = queryEl<HTMLParagraphElement>('#resultSummary');
 const resultReason = queryEl<HTMLParagraphElement>('#resultReason');
 const resultConfidence = queryEl<HTMLParagraphElement>('#resultConfidence');
@@ -588,6 +598,7 @@ function syncButtonState() {
   customChallengeInput.disabled = isVerifying;
   applyCustomChallengeButton.disabled = isVerifying;
   clearCustomChallengeButton.disabled = isVerifying;
+  sharingOverlay.classList.toggle('active', isVerifying);
 }
 
 function setStatus(message: string, kind: 'info' | 'ok' | 'error') {

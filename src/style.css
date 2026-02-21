@@ -160,6 +160,35 @@ body::before {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
+.preview-wrap {
+  position: relative;
+}
+
+.sharing-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 14px;
+  border-radius: 0 0 14px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, rgba(7, 19, 31, 0.08), rgba(7, 19, 31, 0.66));
+  color: #ecf6ff;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  pointer-events: none;
+}
+
+.sharing-overlay.active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .preview-note {
   margin: 8px 0 0;
   color: var(--muted);
