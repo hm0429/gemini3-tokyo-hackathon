@@ -263,6 +263,35 @@ body::before {
   text-align: center;
 }
 
+.digest-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 9, 14, 0.72);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.digest-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.digest-overlay-text {
+  margin: 0;
+  color: #f5fbff;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: clamp(1.25rem, 3vw, 2rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 0 20px rgba(124, 201, 255, 0.32);
+}
+
 .preview-note {
   margin: 8px 0 0;
   color: var(--muted);

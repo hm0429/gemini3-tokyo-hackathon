@@ -293,6 +293,10 @@ app.innerHTML = `
         </div>
       </div>
     </div>
+
+    <div id="digestOverlay" class="digest-overlay" aria-hidden="true">
+      <p class="digest-overlay-text">Digesting Reality…</p>
+    </div>
   </div>
 `;
 
@@ -306,6 +310,7 @@ const statusText = queryEl<HTMLParagraphElement>('#statusText');
 const preview = queryEl<HTMLVideoElement>('#cameraPreview');
 const overlayPreview = queryEl<HTMLVideoElement>('#cameraPreviewOverlay');
 const captureOverlay = queryEl<HTMLDivElement>('#captureOverlay');
+const digestOverlay = queryEl<HTMLDivElement>('#digestOverlay');
 const sharingOverlay = queryEl<HTMLDivElement>('#sharingOverlay');
 const resultSummary = queryEl<HTMLParagraphElement>('#resultSummary');
 const resultReason = queryEl<HTMLParagraphElement>('#resultReason');
@@ -328,6 +333,7 @@ let customChallengeText = loadCustomChallengeText();
 let currentChallenge = customChallengeText ? buildCustomChallenge(customChallengeText) : pickRandomChallenge();
 let isVerifying = false;
 let isCapturing = false;
+let isDigesting = false;
 let activeStream: MediaStream | null = null;
 let activeSession: Session | null = null;
 let handLandmarker: HandLandmarkerLike | null = null;
@@ -500,6 +506,8 @@ async function verifyCurrentChallenge() {
     ];
 
     verifyPhase = 'judge-fallback-model';
+    isDigesting = true;
+    syncButtonState();
     setStatus('モデル判定を実行します。', 'info');
     const fallback = await runFallbackJudgeWithGenerateContent(apiKey, evaluationParts);
     const rawText = fallback.rawText;
@@ -556,6 +564,7 @@ async function verifyCurrentChallenge() {
   } finally {
     isVerifying = false;
     isCapturing = false;
+    isDigesting = false;
     syncButtonState();
     closeSession();
   }
@@ -660,16 +669,21 @@ function renderCustomChallengeState() {
 }
 
 function syncButtonState() {
+  const showCaptureOverlay = isCapturing;
+  const showDigestOverlay = isDigesting && !isCapturing;
+
   verifyButton.disabled = isVerifying;
   newChallengeButton.disabled = isVerifying;
   resetScoreButton.disabled = isVerifying;
   customChallengeInput.disabled = isVerifying;
   applyCustomChallengeButton.disabled = isVerifying;
   clearCustomChallengeButton.disabled = isVerifying;
-  sharingOverlay.classList.toggle('active', isCapturing);
-  captureOverlay.classList.toggle('active', isCapturing);
-  captureOverlay.setAttribute('aria-hidden', String(!isCapturing));
-  document.body.classList.toggle('capture-overlay-open', isCapturing);
+  sharingOverlay.classList.toggle('active', showCaptureOverlay);
+  captureOverlay.classList.toggle('active', showCaptureOverlay);
+  captureOverlay.setAttribute('aria-hidden', String(!showCaptureOverlay));
+  digestOverlay.classList.toggle('active', showDigestOverlay);
+  digestOverlay.setAttribute('aria-hidden', String(!showDigestOverlay));
+  document.body.classList.toggle('capture-overlay-open', showCaptureOverlay || showDigestOverlay);
 }
 
 function setStatus(message: string, kind: 'info' | 'ok' | 'error') {
