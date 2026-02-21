@@ -120,6 +120,12 @@ const FIXED_CHALLENGES: Challenge[] = [
     points: 150,
   },
   {
+    id: 'drink-redbull',
+    title: 'RedBull チャレンジ',
+    description: 'RedBull を飲んでいるところを見たい',
+    points: 160,
+  },
+  {
     id: 'vending-jump',
     title: '自販機ジャンプ',
     description: '自動販売機が映る位置で、その場ジャンプを 2 回してください。',
@@ -147,43 +153,46 @@ if (!app) {
 app.innerHTML = `
   <div class="shell">
     <header class="hero">
-      <p class="eyebrow">ACTION SCORE ADVENTURE</p>
       <h1>The World Quest</h1>
-      <p class="lead">AI がランダムなお題を出題し、Gemini Live API が実行可否を判定します。</p>
+      <p class="lead">Feed the AI's Curiosity</p>
     </header>
 
-    <main class="layout">
-      <section class="panel mission">
-        <div class="panel-head">
-          <h2>現在のお題</h2>
-          <span id="challengePoints" class="points-pill">+0 pt</span>
-        </div>
+    <section class="panel quest-panel quest-top">
+      <div class="panel-head quest-head">
         <h3 id="challengeTitle" class="challenge-title">読み込み中...</h3>
-        <p id="challengeDescription" class="challenge-description"></p>
-        <p id="locationHint" class="location-hint"></p>
+        <span id="challengePoints" class="points-pill">+0 pt</span>
+      </div>
+      <p id="challengeDescription" class="challenge-description"></p>
+      <p id="locationHint" class="location-hint"></p>
 
-        <div class="actions">
-          <button id="newChallengeButton" class="btn ghost">次のお題</button>
-          <button id="verifyButton" class="btn primary">実行を判定する</button>
-          <button id="resetScoreButton" class="btn danger">スコアをリセット</button>
-        </div>
-        <div class="custom-challenge-panel">
-          <p class="custom-challenge-label">Debug カスタムお題</p>
-          <textarea id="customChallengeInput" class="custom-challenge-input" placeholder="例: ハチ公前でスクワットを 5 回してください"></textarea>
-          <div class="custom-challenge-actions">
-            <button id="applyCustomChallengeButton" class="btn ghost" type="button">カスタムお題をセット</button>
-            <button id="clearCustomChallengeButton" class="btn ghost" type="button">カスタム解除</button>
-          </div>
-          <p id="customChallengeMeta" class="custom-challenge-meta"></p>
-        </div>
+      <div class="actions">
+        <button id="newChallengeButton" class="btn ghost">次のお題</button>
+        <button id="verifyButton" class="btn primary">実行を判定する</button>
+      </div>
+      <p id="statusText" class="status info">準備完了。カメラ許可後に判定できます。</p>
+    </section>
 
-        <p id="statusText" class="status info">準備完了。カメラ許可後に判定できます。</p>
+    <main class="play-layout">
+      <section class="panel media-stage">
+        <div class="stage-head">
+          <h2>Mission Camera</h2>
+          <p class="stage-capture">${CAPTURE_SECONDS}s capture</p>
+        </div>
+        <video id="cameraPreview" class="preview" playsinline muted></video>
+        <p class="preview-note">判定時に映像と音声を収集し、モデルで達成可否を判定します。</p>
       </section>
 
-      <section class="panel evidence">
-        <h2>判定ストリーム</h2>
-        <video id="cameraPreview" class="preview" playsinline muted></video>
-        <p class="preview-note">判定中に ${CAPTURE_SECONDS} 秒間の映像を撮影し、代表フレームを Gemini Live API に送信します。</p>
+      <aside class="panel side-panel">
+        <div class="metrics">
+          <div class="metric">
+            <p class="metric-label">TOTAL SCORE</p>
+            <p id="scoreValue" class="metric-value">0</p>
+          </div>
+          <div class="metric">
+            <p class="metric-label">STREAK</p>
+            <p id="streakValue" class="metric-value">0</p>
+          </div>
+        </div>
 
         <div class="result-card">
           <h3>直近の判定結果</h3>
@@ -192,27 +201,41 @@ app.innerHTML = `
           <p id="resultConfidence">信頼度: -</p>
           <p id="resultLocation">位置判定: -</p>
           <p id="resultActions">検出アクション: -</p>
+        </div>
+
+        <div class="history-wrap">
+          <h3>プレイ履歴</h3>
+          <ul id="historyList" class="history-list"></ul>
+        </div>
+      </aside>
+    </main>
+
+    <section class="panel debug-screen">
+      <div class="debug-head">
+        <h2>Debug Screen</h2>
+        <p>従来 UI 相当のデバッグ機能をここに集約しています。</p>
+      </div>
+
+      <div class="debug-grid">
+        <div class="panel-lite">
+          <h3 class="debug-title">Custom Challenge</h3>
+          <div class="custom-challenge-panel">
+            <p class="custom-challenge-label">Debug カスタムお題</p>
+            <textarea id="customChallengeInput" class="custom-challenge-input" placeholder="例: ハチ公前でスクワットを 5 回してください"></textarea>
+            <div class="custom-challenge-actions">
+              <button id="applyCustomChallengeButton" class="btn ghost" type="button">カスタムお題をセット</button>
+              <button id="clearCustomChallengeButton" class="btn ghost" type="button">カスタム解除</button>
+            </div>
+            <button id="resetScoreButton" class="btn danger debug-reset" type="button">スコアをリセット</button>
+            <p id="customChallengeMeta" class="custom-challenge-meta"></p>
+          </div>
+        </div>
+
+        <div class="debug-result panel-lite">
+          <h3>Judge Payload</h3>
           <p class="judge-debug-label">judge result (debug)</p>
           <pre id="judgeJson" class="judge-json">-</pre>
         </div>
-      </section>
-    </main>
-
-    <section class="panel scoreboard">
-      <div class="metrics">
-        <div class="metric">
-          <p class="metric-label">TOTAL SCORE</p>
-          <p id="scoreValue" class="metric-value">0</p>
-        </div>
-        <div class="metric">
-          <p class="metric-label">STREAK</p>
-          <p id="streakValue" class="metric-value">0</p>
-        </div>
-      </div>
-
-      <div class="history-wrap">
-        <h3>プレイ履歴</h3>
-        <ul id="historyList" class="history-list"></ul>
       </div>
     </section>
   </div>
@@ -315,6 +338,18 @@ clearCustomChallengeButton.addEventListener('click', () => {
   renderChallenge(currentChallenge);
   renderCustomChallengeState();
   setStatus('カスタムお題を解除してランダム出題へ戻しました。', 'info');
+});
+
+window.addEventListener('keydown', (event) => {
+  if (event.code !== 'Space' || event.repeat) {
+    return;
+  }
+  if (shouldIgnoreSpaceShortcut(event.target)) {
+    return;
+  }
+
+  event.preventDefault();
+  void verifyCurrentChallenge();
 });
 
 window.addEventListener('beforeunload', () => {
@@ -1767,6 +1802,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
         reject(error);
       });
   });
+}
+
+function shouldIgnoreSpaceShortcut(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON';
 }
 
 function escapeHtml(text: string): string {
